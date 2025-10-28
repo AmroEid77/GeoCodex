@@ -22,6 +22,20 @@
  ***************************************************************************/
  This script initializes the plugin, making it known to QGIS.
 """
+import os
+import sys
+
+plugin_dir = os.path.dirname(__file__)
+
+# Get the parent directory (the project root, e.g., /path/to/project)
+project_root = os.path.dirname(plugin_dir)
+
+# Construct the path to the top-level 'vendor' directory
+vendor_dir = os.path.join(project_root, 'vendor')
+
+# Add the vendor directory to the Python path
+if vendor_dir not in sys.path:
+    sys.path.insert(0, vendor_dir)
 
 
 # noinspection PyPep8Naming
