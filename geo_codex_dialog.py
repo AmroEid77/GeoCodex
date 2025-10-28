@@ -23,22 +23,68 @@
 """
 
 import os
-
 from qgis.PyQt import uic
-from qgis.PyQt import QtWidgets
+from qgis.PyQt.QtWidgets import QDialog
 
-# This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
+# --- Import QGIS logging tools ---
+from qgis.core import QgsMessageLog, Qgis
+
+from .geo_codex_logic.core.llm_client import LLMClient
+from .geo_codex_logic.core.db_connector import DBConnector
+
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
-    os.path.dirname(__file__), 'geo_codex_dialog_base.ui'))
+    os.path.dirname(__file__), 'ai_agent_dialog.ui'))
 
-
-class GeoCodexDialog(QtWidgets.QDialog, FORM_CLASS):
+class GeoCodexDialog(QDialog, FORM_CLASS):
     def __init__(self, parent=None):
-        """Constructor."""
         super(GeoCodexDialog, self).__init__(parent)
-        # Set up the user interface from Designer through FORM_CLASS.
-        # After self.setupUi() you can access any designer object by doing
-        # self.<objectname>, and you can use autoconnect slots - see
-        # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
-        # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
+        self.testConnectionBtn.clicked.connect(self.on_test_connections_click)
+
+    def on_test_connections_click(self):
+        log = lambda msg: QgsMessageLog.logMessage(str(msg), 'GeoCodex', Qgis.Info)
+        log("--- 'Test Connections' button clicked ---")
+        # --- 1. Get all credentials from the UI input fields ---
+        api_key = self.apiKeyInput.text()
+        db_host = self.dbHostInput.text()
+        db_port = self.dbPortInput.text()
+        db_name = self.dbNameInput.text()
+        db_user = self.dbUserInput.text()
+        db_pass = self.dbPassInput.text()
+
+        # --- 2. Test the LLM Connection ---
+        self.statusLabel.setText("Status: Testing LLM connection...")
+        try:
+            llm_client = LLMClient(api_key=api_key)
+            llm_success, llm_message = llm_client.test_connection()
+        except Exception as e:
+            # If the __init__ itself fails, this will catch it.
+            log(f"CRITICAL: An exception occurred while creating LLMClient instance: {e}")
+            llm_success, llm_message = False, str(e)
+
+        if not llm_success:
+            self.statusLabel.setText(f"Status: LLM Error - {llm_message}")
+            log(f"Stopping due to LLM error: {llm_message}")
+            return
+
+        self.statusLabel.setText("Status: LLM OK. Testing database connection...")
+
+        # --- 3. Test the Database Connection ---
+        try:
+            db_connector = DBConnector(
+                host=db_host,
+                port=db_port,
+                dbname=db_name,
+                user=db_user,
+                password=db_pass
+            )
+            db_success, db_message = db_connector.test_connection()
+        except Exception as e:
+            db_success, db_message = False, str(e)
+            
+        if not db_success:
+            self.statusLabel.setText(f"Status: DB Error - {db_message}")
+            return
+
+        # --- 4. Report final success ---
+        self.statusLabel.setText("Status: Success! Both LLM and Database connections are working.")
