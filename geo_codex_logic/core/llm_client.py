@@ -100,3 +100,34 @@ class LLMClient:
         except Exception as e:
             log(f"Connection test CRITICAL failure: {e}")
             return False, f"Connection failed: {str(e)}"
+
+    def generate_response(self, prompt_text: str) -> str:
+        """
+        Sends a single prompt to the LLM and gets a complete response.
+
+        Args:
+            prompt_text (str): The full prompt to send to the model.
+
+        Returns:
+            str: The LLM's response content, or an error message.
+        """
+        log = lambda msg: QgsMessageLog.logMessage(str(msg), 'GeoCodex-LLM', Qgis.Info)
+        
+        if not self.client:
+            log("generate_response failed because self.client is None.")
+            return "Error: Client not initialized."
+            
+        try:
+            log("Invoking model for a single response...")
+            response = self.client.invoke(prompt_text)
+            
+            if response and response.content:
+                log("Response received successfully.")
+                return response.content.strip()
+            else:
+                log("Received an empty response from the model.")
+                return "Error: Received an empty response."
+
+        except Exception as e:
+            log(f"Model invocation failed: {e}")
+            return f"Error: {e}"
