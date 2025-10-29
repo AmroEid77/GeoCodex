@@ -25,12 +25,14 @@
 import os
 from qgis.PyQt import uic
 from qgis.PyQt.QtWidgets import QDialog
-
+from qgis.core import QgsVectorLayer, QgsProject
+from urllib.parse import quote_plus # For safely encoding the SQL query
 # --- Import QGIS logging tools ---
 from qgis.core import QgsMessageLog, Qgis
 
 from .geo_codex_logic.core.llm_client import LLMClient
 from .geo_codex_logic.core.db_connector import DBConnector
+from .geo_codex_logic.utils import prompt_builder
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'ai_agent_dialog.ui'))
@@ -40,6 +42,11 @@ class GeoCodexDialog(QDialog, FORM_CLASS):
         super(GeoCodexDialog, self).__init__(parent)
         self.setupUi(self)
         self.testConnectionBtn.clicked.connect(self.on_test_connections_click)
+
+        # The objectName 'generateSqlBtn' comes from your .ui file
+        self.generateSqlBtn.clicked.connect(self.on_generate_sql_click)
+        # Connect the 'Execute' button ---
+        self.executeSqlBtn.clicked.connect(self.on_execute_sql_click)
 
     def on_test_connections_click(self):
         log = lambda msg: QgsMessageLog.logMessage(str(msg), 'GeoCodex', Qgis.Info)
@@ -88,3 +95,149 @@ class GeoCodexDialog(QDialog, FORM_CLASS):
 
         # --- 4. Report final success ---
         self.statusLabel.setText("Status: Success! Both LLM and Database connections are working.")
+
+    def on_generate_sql_click(self):
+        """
+        Handles the logic for the 'Generate SQL' button.
+        """
+        log = lambda msg: QgsMessageLog.logMessage(str(msg), 'GeoCodex', Qgis.Info)
+        log("--- 'Generate SQL' button clicked ---")
+        
+        # --- 1. Get inputs from UI ---
+        api_key = self.apiKeyInput.text()
+        user_query = self.userQueryInput.toPlainText()
+        
+        if not user_query:
+            self.statusLabel.setText("Status: Please enter a question first.")
+            return
+
+        self.statusLabel.setText("Status: Fetching database schema...")
+        
+        try:
+            # --- 2. Get DB Schema ---
+            db_connector = DBConnector(
+                host=self.dbHostInput.text(),
+                port=self.dbPortInput.text(),
+                dbname=self.dbNameInput.text(),
+                user=self.dbUserInput.text(),
+                password=self.dbPassInput.text()
+            )
+            schema_info = db_connector.get_schema_info()
+            if "Error:" in schema_info:
+                self.statusLabel.setText(f"Status: {schema_info}")
+                return
+
+            self.statusLabel.setText("Status: Building prompt...")
+            
+            # --- 3. Build the Prompt ---
+            final_prompt = prompt_builder.build_sql_prompt(user_query, schema_info)
+            log(f"Final prompt being sent to LLM:\n{final_prompt}")
+
+            self.statusLabel.setText("Status: Sending request to LLM...")
+
+            # --- 4. Call the LLM ---
+            llm_client = LLMClient(api_key=api_key)
+            sql_response = llm_client.generate_response(final_prompt)
+            
+            if "Error:" in sql_response:
+                self.statusLabel.setText(f"Status: {sql_response}")
+                return
+
+            # --- 5. Display the result ---
+            # Remove potential markdown code fences that models sometimes add
+            clean_sql = sql_response.replace("```sql", "").replace("```", "").strip()
+            self.sqlResultOutput.setPlainText(clean_sql)
+            self.statusLabel.setText("Status: SQL generated successfully! Please review and execute.")
+
+        except Exception as e:
+            error_msg = f"An unexpected error occurred: {e}"
+            log(error_msg)
+            self.statusLabel.setText(f"Status: {error_msg}")
+    def on_execute_sql_click(self):
+        """
+        Executes the SQL from the text box and loads the result as a QGIS layer.
+        """
+        log = lambda msg: QgsMessageLog.logMessage(str(msg), 'GeoCodex', Qgis.Info)
+        log("--- 'Execute SQL' button clicked ---")
+
+        # --- 1. Get credentials and the SQL query ---
+        host = self.dbHostInput.text()
+        port = self.dbPortInput.text()
+        dbname = self.dbNameInput.text()
+        user = self.dbUserInput.text()
+        password = self.dbPassInput.text()
+        sql_query = self.sqlResultOutput.toPlainText()
+
+        if not sql_query:
+            self.statusLabel.setText("Status: No SQL query to execute.")
+            return
+        
+        self.statusLabel.setText("Status: Executing query and creating layer...")
+
+        try:
+            # Log the SQL for debugging
+            log(f"Raw SQL Query: {sql_query}")
+            
+            # --- 2. Clean the SQL query ---
+            # Remove trailing semicolons (QGIS doesn't like them in URI parameters)
+            sql_query = sql_query.strip().rstrip(';')
+            
+            # --- 3. Use QgsDataSourceUri for proper URI construction ---
+            from qgis.core import QgsDataSourceUri
+            uri = QgsDataSourceUri()
+            uri.setConnection(host, port, dbname, user, password)
+            
+            # --- 4. Wrap the SQL query to ensure it has a primary key ---
+            # QGIS requires a unique identifier for each row
+            wrapped_sql = f"SELECT ROW_NUMBER() OVER() AS gid, * FROM ({sql_query}) AS subquery"
+            
+            # Set the data source: schema, sql, geometry_col, where_clause, key
+            uri.setDataSource("", f"({wrapped_sql})", "geom", "", "gid")
+            
+            log(f"Final URI: {uri.uri(False)}")
+
+            # --- 5. Create the Vector Layer ---
+            layer_name = self.userQueryInput.toPlainText()[:30] or "AI Generated Layer"
+            log(f"Attempting to create layer: {layer_name}")
+            
+            layer = QgsVectorLayer(uri.uri(False), layer_name, "postgres")
+            
+            # --- 6. Validate and Add the Layer to the Project ---
+            if not layer.isValid():
+                # Try to get more detailed error information
+                error = layer.error()
+                error_summary = error.summary() if error else "Unknown error"
+                error_message = error.message() if error else "No detailed error message"
+                
+                # Also check the provider registry for more details
+                from qgis.core import QgsProviderRegistry
+                provider_metadata = QgsProviderRegistry.instance().providerMetadata('postgres')
+                
+                # Log detailed error information
+                log(f"Layer validation failed. Error summary: {error_summary}")
+                log(f"Layer validation failed. Error message: {error_message}")
+                
+                # Try to get more details from the data provider
+                if layer.dataProvider():
+                    dp_error = layer.dataProvider().error()
+                    if dp_error:
+                        log(f"Data provider error summary: {dp_error.summary()}")
+                        log(f"Data provider error message: {dp_error.message()}")
+                
+                # Use the more informative error message
+                detailed_error = error_message or error_summary or "Unknown error"
+                error_msg = f"Layer failed to load: {detailed_error}"
+                log(error_msg)
+                self.statusLabel.setText(f"Status: {error_msg}")
+                return
+
+            QgsProject.instance().addMapLayer(layer)
+            log(f"Layer '{layer_name}' added successfully. Feature count: {layer.featureCount()}")
+            self.statusLabel.setText(f"Status: Success! Layer '{layer_name}' added to the map ({layer.featureCount()} features).")
+
+        except Exception as e:
+            import traceback
+            error_msg = f"An unexpected error occurred during layer creation: {e}"
+            log(error_msg)
+            log(f"Traceback: {traceback.format_exc()}")
+            self.statusLabel.setText(f"Status: {error_msg}")
