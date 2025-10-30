@@ -9,6 +9,17 @@ vendor_dir = os.path.join(plugin_dir, 'vendor')
 if vendor_dir not in sys.path:
     sys.path.insert(0, vendor_dir)
 
+try:
+    import langchain as _lc
+    if not hasattr(_lc, "verbose"):
+        _lc.verbose = False
+    if not hasattr(_lc, "debug"):
+        _lc.debug = False
+    if not hasattr(_lc, "llm_cache"):
+        _lc.llm_cache = None
+except Exception:
+    pass
+
 # Now we can safely import our vendored libraries
 from dotenv import load_dotenv
 import certifi
@@ -130,4 +141,57 @@ class LLMClient:
 
         except Exception as e:
             log(f"Model invocation failed: {e}")
+            return f"Error: {e}"
+    
+    def get_workflow_steps_from_image(self, base64_image: str) -> str:
+        """
+        Sends an image to the vision model and asks it to generate workflow steps.
+        
+        Args:
+            base64_image: A Base64 encoded string of the workflow image.
+
+        Returns:
+            A string containing the textual workflow steps, or an error message.
+        """
+        log = lambda msg: QgsMessageLog.logMessage(str(msg), 'GeoCodex-LLM', Qgis.Info)
+
+        if not self.client:
+            return "Error: Vision client not initialized."
+
+        try:
+            log("Invoking vision model...")
+            
+            # This is the standard LangChain format for multimodal input
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": """You are a GIS workflow expert. Analyze this image and describe the sequence of QGIS operations shown.
+                                       Break it down into a numbered list of simple, unambiguous actions.
+                                       For example:
+                                       1. Load the 'rivers' shapefile.
+                                       2. Apply a 100-meter buffer to the 'rivers' layer.
+                                       3. Intersect the 'buffered rivers' layer with the 'land parcels' layer."""
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                        },
+                    ],
+                }
+            ]
+
+            # Use invoke for a single, complete response
+            response = self.client.invoke(messages)
+            
+            if response and response.content:
+                log("Successfully received workflow steps from vision model.")
+                return response.content.strip()
+            else:
+                return "Error: Vision model returned an empty response."
+
+        except Exception as e:
+            log(f"Vision model invocation failed: {e}")
             return f"Error: {e}"

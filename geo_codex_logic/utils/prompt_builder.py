@@ -45,3 +45,39 @@ USER'S REQUEST:
 SQL QUERY:
 """
     return prompt
+
+
+def build_sql_from_steps_prompt(workflow_steps: str, schema_info: str) -> str:
+    """
+    Constructs a prompt for the LLM to generate a single SQL query from a list of steps.
+
+    Args:
+        workflow_steps (str): The textual workflow steps from the vision model (Agent 1).
+        schema_info (str): The database schema for context.
+
+    Returns:
+        str: The fully formatted prompt for the SQL generation model (Agent 2).
+    """
+    
+    prompt = f"""
+You are an expert PostGIS data analyst. Your task is to convert a sequence of workflow steps into a SINGLE, consolidated, and executable SQL query. You may need to use Common Table Expressions (CTEs) with the `WITH` clause to chain operations together.
+
+Follow these rules STRICTLY:
+1.  Analyze the database schema provided to understand the available tables and columns.
+2.  Read all the workflow steps first to understand the final goal.
+3.  Combine the steps into a single SQL query. For example, a "buffer" step followed by an "intersect" step should be a single query like `SELECT ... FROM table_a, table_b WHERE ST_Intersects(ST_Buffer(table_a.geom, 100), table_b.geom)`.
+4.  ALWAYS include the geometry column in the final SELECT statement so the result can be mapped.
+5.  Provide ONLY the raw SQL code as your response. Do not include any explanations or markdown formatting.
+6.  Do not add a semicolon at the end of your query.
+
+---
+DATABASE SCHEMA CONTEXT:
+{schema_info}
+---
+WORKFLOW STEPS TO IMPLEMENT:
+{workflow_steps}
+---
+
+SINGLE CONSOLIDATED SQL QUERY:
+"""
+    return prompt

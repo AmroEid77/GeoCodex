@@ -34,6 +34,7 @@ from .geo_codex_logic.orchestrator import WorkflowOrchestrator
 from .geo_codex_logic.core.llm_client import LLMClient
 from .geo_codex_logic.core.db_connector import DBConnector
 from .geo_codex_logic.utils import prompt_builder
+from qgis.PyQt.QtWidgets import QFileDialog
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'ai_agent_dialog.ui'))
@@ -48,6 +49,11 @@ class GeoCodexDialog(QDialog, FORM_CLASS):
         self.generateSqlBtn.clicked.connect(self.on_generate_sql_click)
         # Connect the 'Execute' button ---
         self.executeSqlBtn.clicked.connect(self.on_execute_sql_click)
+
+        # --- NEW V3 CONNECTIONS ---
+        self.browseImgBtn.clicked.connect(self.on_browse_image)
+        self.processAgentBtn.clicked.connect(self.on_process_agent_click)
+
 
     def on_test_connections_click(self):
         log = lambda msg: QgsMessageLog.logMessage(str(msg), 'GeoCodex', Qgis.Info)
@@ -137,3 +143,36 @@ class GeoCodexDialog(QDialog, FORM_CLASS):
         success, message = orchestrator.run_sql_to_layer_workflow(sql_query, layer_name)
 
         self.statusLabel.setText(f"Status: {message}")
+    
+    def on_browse_image(self):
+        """ Opens a file dialog to select an image. """
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select Workflow Image", "", "Images (*.png *.jpg *.jpeg)")
+        if file_path:
+            self.imagePathInput.setText(file_path)
+
+    def on_process_agent_click(self):
+        """ Kicks off the image-to-SQL workflow. """
+        self.statusLabel.setText("Status: Starting image-to-SQL workflow...")
+        image_path = self.imagePathInput.text()
+        if not image_path:
+            self.statusLabel.setText("Status: Please select an image file first.")
+            return
+
+        orchestrator = self._get_orchestrator()
+        # Call the new, correct orchestrator method
+        success, result_sql = orchestrator.run_image_to_sql_workflow(image_path)
+
+        if success:
+            # --- THIS IS THE KEY CHANGE ---
+            # Place the resulting SQL into the *SQL output box* on the other tab
+            self.sqlResultOutput.setPlainText(result_sql)
+            
+            # And also put the user's request into the text box for context
+            self.userQueryInput.setPlainText(f"Generated from image: {os.path.basename(image_path)}")
+
+            # Switch the user's view to the SQL tab so they can see the result
+            self.mainTabWidget.setCurrentIndex(1) # Index 1 is the "Ask Data (SQL)" tab
+            
+            self.statusLabel.setText("Status: SQL generated from image! Please review and execute.")
+        else:
+            self.statusLabel.setText(f"Status: Workflow Error - {result_sql}")
