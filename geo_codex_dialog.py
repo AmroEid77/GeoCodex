@@ -24,155 +24,752 @@
 
 import os
 from qgis.PyQt import uic
-from qgis.PyQt.QtWidgets import QDialog
-from qgis.core import QgsVectorLayer, QgsProject
-from urllib.parse import quote_plus # For safely encoding the SQL query
-# --- Import QGIS logging tools ---
-from qgis.core import QgsMessageLog, Qgis
-from .geo_codex_logic.orchestrator import WorkflowOrchestrator
+from qgis.PyQt.QtWidgets import QDialog, QFileDialog, QApplication
+from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal, QObject
+from qgis.PyQt.QtGui import QPixmap
+from qgis.core import QgsVectorLayer, QgsProject, QgsMessageLog, Qgis
 
+from .geo_codex_logic.orchestrator import WorkflowOrchestrator
 from .geo_codex_logic.core.llm_client import LLMClient
+from .geo_codex_logic.core.llm_provider import (
+    LLMProvider, get_provider_from_string, get_models_for_provider,
+    get_default_model, get_default_base_url, PROVIDER_DEFAULTS
+)
 from .geo_codex_logic.core.db_connector import DBConnector
-from .geo_codex_logic.utils import prompt_builder
-from qgis.PyQt.QtWidgets import QFileDialog
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'ai_agent_dialog.ui'))
+
+
+class WorkerSignals(QObject):
+    """Signals for background worker threads"""
+    finished = pyqtSignal(bool, str)  # success, result
+    error = pyqtSignal(str)  # error message
+    progress = pyqtSignal(str)  # status message
+
+
+class AsyncWorker(QThread):
+    """Worker thread for running long operations without blocking UI"""
+    
+    def __init__(self, func, *args, **kwargs):
+        super().__init__()
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+        self.signals = WorkerSignals()
+    
+    def run(self):
+        try:
+            result = self.func(*self.args, **self.kwargs)
+            if isinstance(result, tuple) and len(result) == 2:
+                self.signals.finished.emit(result[0], result[1])
+            else:
+                self.signals.finished.emit(True, str(result))
+        except Exception as e:
+            self.signals.error.emit(str(e))
+
 
 class GeoCodexDialog(QDialog, FORM_CLASS):
     def __init__(self, parent=None):
         super(GeoCodexDialog, self).__init__(parent)
         self.setupUi(self)
+        
+        # Chat state
+        self.chat_history = []  # List of {"role": "user"/"assistant", "content": str, "image": optional str}
+        self.attached_image_path = None
+        self.current_sql = None
+        
+        # Worker thread reference (to prevent garbage collection)
+        self.worker = None
+        
+        # --- UI Connections ---
         self.testConnectionBtn.clicked.connect(self.on_test_connections_click)
-
-        # The objectName 'generateSqlBtn' comes from your .ui file
         self.generateSqlBtn.clicked.connect(self.on_generate_sql_click)
-        # Connect the 'Execute' button ---
         self.executeSqlBtn.clicked.connect(self.on_execute_sql_click)
-
-        # --- NEW V3 CONNECTIONS ---
-        self.browseImgBtn.clicked.connect(self.on_browse_image)
-        self.processAgentBtn.clicked.connect(self.on_process_agent_click)
-
-
-    def on_test_connections_click(self):
-        log = lambda msg: QgsMessageLog.logMessage(str(msg), 'GeoCodex', Qgis.Info)
-        log("--- 'Test Connections' button clicked ---")
-        # --- 1. Get all credentials from the UI input fields ---
-        api_key = self.apiKeyInput.text()
-        db_host = self.dbHostInput.text()
-        db_port = self.dbPortInput.text()
-        db_name = self.dbNameInput.text()
-        db_user = self.dbUserInput.text()
-        db_pass = self.dbPassInput.text()
-
-        # --- 2. Test the LLM Connection ---
-        self.statusLabel.setText("Status: Testing LLM connection...")
-        try:
-            llm_client = LLMClient(api_key=api_key)
-            llm_success, llm_message = llm_client.test_connection()
-        except Exception as e:
-            # If the __init__ itself fails, this will catch it.
-            log(f"CRITICAL: An exception occurred while creating LLMClient instance: {e}")
-            llm_success, llm_message = False, str(e)
-
-        if not llm_success:
-            self.statusLabel.setText(f"Status: LLM Error - {llm_message}")
-            log(f"Stopping due to LLM error: {llm_message}")
-            return
-
-        self.statusLabel.setText("Status: LLM OK. Testing database connection...")
-
-        # --- 3. Test the Database Connection ---
-        try:
-            db_connector = DBConnector(
-                host=db_host,
-                port=db_port,
-                dbname=db_name,
-                user=db_user,
-                password=db_pass
+        
+        # --- Chat Tab Connections ---
+        self.sendMessageBtn.clicked.connect(self.on_send_message_click)
+        self.attachImageBtn.clicked.connect(self.on_attach_image_click)
+        self.removeAttachmentBtn.clicked.connect(self.on_remove_attachment_click)
+        self.clearChatBtn.clicked.connect(self.on_clear_chat_click)
+        self.copySqlBtn.clicked.connect(self.on_copy_sql_click)
+        self.runSqlFromChatBtn.clicked.connect(self.on_run_sql_from_chat_click)
+        self.hideSqlPanelBtn.clicked.connect(self.on_hide_sql_panel_click)
+        
+        # --- Provider Configuration Connections ---
+        self.interpreterProviderCombo.currentTextChanged.connect(self._on_interpreter_provider_changed)
+        self.coderProviderCombo.currentTextChanged.connect(self._on_coder_provider_changed)
+        self.useSameModelCheckbox.stateChanged.connect(self._on_same_model_checkbox_changed)
+        
+        # --- Initialize model dropdowns ---
+        self._populate_initial_models()
+        
+        # --- Initialize chat UI state ---
+        self._init_chat_ui()
+    
+    def _set_ui_busy(self, busy: bool, status_message: str = ""):
+        """Enable/disable UI elements during async operations"""
+        # Disable/enable buttons during processing
+        self.testConnectionBtn.setEnabled(not busy)
+        self.generateSqlBtn.setEnabled(not busy)
+        self.executeSqlBtn.setEnabled(not busy)
+        self.sendMessageBtn.setEnabled(not busy)
+        self.runSqlFromChatBtn.setEnabled(not busy)
+        
+        if status_message:
+            self.statusLabel.setText(f"Status: {status_message}")
+    
+    def _populate_initial_models(self):
+        """Populate model dropdowns with default values"""
+        # Initialize interpreter models (default to OpenAI)
+        self._update_model_dropdown(
+            self.interpreterModelCombo, 
+            LLMProvider.OPENAI, 
+            for_vision=True
+        )
+        
+        # Initialize coder models
+        self._update_model_dropdown(
+            self.coderModelCombo, 
+            LLMProvider.OPENAI, 
+            for_vision=False
+        )
+    
+    def _update_model_dropdown(self, combo, provider: LLMProvider, for_vision: bool):
+        """Update a model dropdown with models for the given provider"""
+        combo.clear()
+        models = get_models_for_provider(provider, for_vision)
+        combo.addItems(models)
+        
+        # Set default model
+        default_model = get_default_model(provider, for_vision)
+        index = combo.findText(default_model)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+        
+        # Update base URL placeholder
+        if for_vision:
+            base_url = get_default_base_url(provider)
+            self.interpreterBaseUrlInput.setPlaceholderText(
+                base_url if base_url else "Optional: Custom endpoint URL"
             )
-            db_success, db_message = db_connector.test_connection()
-        except Exception as e:
-            db_success, db_message = False, str(e)
-            
-        if not db_success:
-            self.statusLabel.setText(f"Status: DB Error - {db_message}")
-            return
-
-        # --- 4. Report final success ---
-        self.statusLabel.setText("Status: Success! Both LLM and Database connections are working.")
-
-    def _get_orchestrator(self):
-        """ Helper method to create an orchestrator with current credentials. """
-        api_key = self.apiKeyInput.text()
-        db_params = {
+        else:
+            base_url = get_default_base_url(provider)
+            self.coderBaseUrlInput.setPlaceholderText(
+                base_url if base_url else "Optional: Custom endpoint URL"
+            )
+    
+    def _on_interpreter_provider_changed(self, provider_text: str):
+        """Handle interpreter provider change"""
+        provider = get_provider_from_string(provider_text)
+        self._update_model_dropdown(self.interpreterModelCombo, provider, for_vision=True)
+        
+        # Update API key placeholder based on provider
+        if provider == LLMProvider.OLLAMA:
+            self.interpreterApiKeyInput.setPlaceholderText("Not required for Ollama")
+            self.interpreterApiKeyInput.setEnabled(False)
+        else:
+            self.interpreterApiKeyInput.setPlaceholderText("Enter API key")
+            self.interpreterApiKeyInput.setEnabled(True)
+    
+    def _on_coder_provider_changed(self, provider_text: str):
+        """Handle coder provider change"""
+        provider = get_provider_from_string(provider_text)
+        self._update_model_dropdown(self.coderModelCombo, provider, for_vision=False)
+        
+        # Update API key placeholder based on provider
+        if provider == LLMProvider.OLLAMA:
+            self.coderApiKeyInput.setPlaceholderText("Not required for Ollama")
+            self.coderApiKeyInput.setEnabled(False)
+        else:
+            self.coderApiKeyInput.setPlaceholderText("Enter API key")
+            self.coderApiKeyInput.setEnabled(True)
+    
+    def _on_same_model_checkbox_changed(self, state):
+        """Handle the 'use same model' checkbox"""
+        use_same = state == Qt.Checked
+        self.groupBox_coder.setEnabled(not use_same)
+    
+    def _get_interpreter_config(self) -> dict:
+        """Get interpreter model configuration from UI"""
+        provider_text = self.interpreterProviderCombo.currentText()
+        return {
+            "provider": provider_text,
+            "api_key": self.interpreterApiKeyInput.text() or None,
+            "model_name": self.interpreterModelCombo.currentText(),
+            "base_url": self.interpreterBaseUrlInput.text() or None
+        }
+    
+    def _get_coder_config(self) -> dict:
+        """Get coder model configuration from UI"""
+        # If using same model, return interpreter config
+        if self.useSameModelCheckbox.isChecked():
+            return self._get_interpreter_config()
+        
+        provider_text = self.coderProviderCombo.currentText()
+        return {
+            "provider": provider_text,
+            "api_key": self.coderApiKeyInput.text() or None,
+            "model_name": self.coderModelCombo.currentText(),
+            "base_url": self.coderBaseUrlInput.text() or None
+        }
+    
+    def _get_db_params(self) -> dict:
+        """Get database parameters from UI"""
+        return {
             "host": self.dbHostInput.text(),
             "port": self.dbPortInput.text(),
             "dbname": self.dbNameInput.text(),
             "user": self.dbUserInput.text(),
             "password": self.dbPassInput.text()
         }
-        return WorkflowOrchestrator(api_key, db_params)
+
+    def on_test_connections_click(self):
+        """Test all connections asynchronously"""
+        log = lambda msg: QgsMessageLog.logMessage(str(msg), 'GeoCodex', Qgis.Info)
+        log("--- 'Test Connections' button clicked ---")
+        
+        # Disable UI during test
+        self._set_ui_busy(True, "Testing connections...")
+        
+        # Store configs for worker
+        interpreter_config = self._get_interpreter_config()
+        coder_config = self._get_coder_config()
+        db_params = self._get_db_params()
+        use_same_model = self.useSameModelCheckbox.isChecked()
+        
+        def do_test_connections():
+            """Worker function to test connections"""
+            # Test Interpreter LLM
+            try:
+                interpreter_client = LLMClient(
+                    provider=interpreter_config["provider"],
+                    api_key=interpreter_config["api_key"],
+                    model_name=interpreter_config["model_name"],
+                    base_url=interpreter_config["base_url"]
+                )
+                llm_success, llm_message = interpreter_client.test_connection()
+                if not llm_success:
+                    return False, f"Interpreter LLM Error - {llm_message}"
+            except Exception as e:
+                return False, f"Interpreter LLM Error - {str(e)}"
+            
+            # Test Coder LLM if different
+            if not use_same_model:
+                try:
+                    coder_client = LLMClient(
+                        provider=coder_config["provider"],
+                        api_key=coder_config["api_key"],
+                        model_name=coder_config["model_name"],
+                        base_url=coder_config["base_url"]
+                    )
+                    coder_success, coder_message = coder_client.test_connection()
+                    if not coder_success:
+                        return False, f"Coder LLM Error - {coder_message}"
+                except Exception as e:
+                    return False, f"Coder LLM Error - {str(e)}"
+            
+            # Test Database
+            try:
+                db_connector = DBConnector(**db_params)
+                db_success, db_message = db_connector.test_connection()
+                if not db_success:
+                    return False, f"DB Error - {db_message}"
+            except Exception as e:
+                return False, f"DB Error - {str(e)}"
+            
+            return True, "Success! All connections are working."
+        
+        def on_test_finished(success, message):
+            self._set_ui_busy(False)
+            self.statusLabel.setText(f"Status: {message}")
+        
+        def on_test_error(error_msg):
+            self._set_ui_busy(False)
+            self.statusLabel.setText(f"Status: Error - {error_msg}")
+        
+        # Create and start worker
+        self.worker = AsyncWorker(do_test_connections)
+        self.worker.signals.finished.connect(on_test_finished)
+        self.worker.signals.error.connect(on_test_error)
+        self.worker.start()
+
+    def _get_orchestrator(self):
+        """Helper method to create an orchestrator with current credentials."""
+        interpreter_config = self._get_interpreter_config()
+        coder_config = self._get_coder_config()
+        db_params = self._get_db_params()
+        
+        return WorkflowOrchestrator(
+            interpreter_config=interpreter_config,
+            coder_config=coder_config,
+            db_params=db_params
+        )
 
     def on_generate_sql_click(self):
-        self.statusLabel.setText("Status: Starting SQL generation...")
+        """Generate SQL asynchronously"""
         user_query = self.userQueryInput.toPlainText()
         if not user_query:
             self.statusLabel.setText("Status: Please enter a question.")
             return
 
-        orchestrator = self._get_orchestrator()
-        success, result = orchestrator.run_nl_to_sql_workflow(user_query)
-
-        if success:
-            self.sqlResultOutput.setPlainText(result)
-            self.statusLabel.setText("Status: SQL generated successfully! Please review.")
-        else:
-            self.statusLabel.setText(f"Status: Error - {result}")
+        self._set_ui_busy(True, "Generating SQL...")
+        
+        # Store orchestrator configs
+        interpreter_config = self._get_interpreter_config()
+        coder_config = self._get_coder_config()
+        db_params = self._get_db_params()
+        
+        def do_generate_sql():
+            """Worker function to generate SQL"""
+            orchestrator = WorkflowOrchestrator(
+                interpreter_config=interpreter_config,
+                coder_config=coder_config,
+                db_params=db_params
+            )
+            return orchestrator.run_nl_to_sql_workflow(user_query)
+        
+        def on_sql_finished(success, result):
+            self._set_ui_busy(False)
+            if success:
+                self.sqlResultOutput.setPlainText(result)
+                self.statusLabel.setText("Status: SQL generated successfully! Please review.")
+            else:
+                self.statusLabel.setText(f"Status: Error - {result}")
+        
+        def on_sql_error(error_msg):
+            self._set_ui_busy(False)
+            self.statusLabel.setText(f"Status: Error - {error_msg}")
+        
+        # Create and start worker
+        self.worker = AsyncWorker(do_generate_sql)
+        self.worker.signals.finished.connect(on_sql_finished)
+        self.worker.signals.error.connect(on_sql_error)
+        self.worker.start()
 
     def on_execute_sql_click(self):
-        self.statusLabel.setText("Status: Executing query...")
+        """Execute SQL with auto-fix capability - async"""
         sql_query = self.sqlResultOutput.toPlainText()
         if not sql_query:
             self.statusLabel.setText("Status: No SQL query to execute.")
             return
 
+        self._set_ui_busy(True, "Executing SQL (with auto-fix enabled)...")
+        self.executeSqlBtn.setEnabled(False)  # Extra disable for execute button
+        
         layer_name = self.userQueryInput.toPlainText()[:30] or "AI Generated Layer"
-        orchestrator = self._get_orchestrator()
-        success, message = orchestrator.run_sql_to_layer_workflow(sql_query, layer_name)
-
-        self.statusLabel.setText(f"Status: {message}")
+        
+        # Store configs for worker
+        interpreter_config = self._get_interpreter_config()
+        coder_config = self._get_coder_config()
+        db_params = self._get_db_params()
+        
+        def do_execute_with_auto_fix():
+            """Worker function to execute SQL with auto-fix"""
+            orchestrator = WorkflowOrchestrator(
+                interpreter_config=interpreter_config,
+                coder_config=coder_config,
+                db_params=db_params
+            )
+            # Use the new auto-fix method with max 3 retries
+            success, message, final_sql = orchestrator.run_sql_with_auto_fix(
+                sql_query, layer_name, max_retries=3
+            )
+            # Return as tuple with the final SQL
+            return success, f"{message}|||{final_sql}"
+        
+        def on_execute_finished(success, result):
+            self._set_ui_busy(False)
+            self.executeSqlBtn.setEnabled(True)
+            
+            # Parse result (message|||final_sql)
+            parts = result.split("|||")
+            message = parts[0]
+            final_sql = parts[1] if len(parts) > 1 else sql_query
+            
+            if success:
+                # Update the SQL panel with the final (possibly fixed) SQL
+                if final_sql.strip() != sql_query.strip():
+                    self.sqlResultOutput.setPlainText(final_sql)
+                    self.statusLabel.setText(f"Status: {message} (SQL was auto-corrected)")
+                else:
+                    self.statusLabel.setText(f"Status: {message}")
+            else:
+                self.statusLabel.setText(f"Status: {message[:100]}")
+        
+        def on_execute_error(error_msg):
+            self._set_ui_busy(False)
+            self.executeSqlBtn.setEnabled(True)
+            self.statusLabel.setText(f"Status: Error - {error_msg}")
+        
+        # Create and start worker
+        self.worker = AsyncWorker(do_execute_with_auto_fix)
+        self.worker.signals.finished.connect(on_execute_finished)
+        self.worker.signals.error.connect(on_execute_error)
+        self.worker.start()
     
-    def on_browse_image(self):
-        """ Opens a file dialog to select an image. """
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Workflow Image", "", "Images (*.png *.jpg *.jpeg)")
+    # ====================
+    # CHAT TAB METHODS
+    # ====================
+    
+    def _init_chat_ui(self):
+        """Initialize chat UI state"""
+        self.imageAttachmentFrame.setVisible(False)
+        self.sqlScriptGroupBox.setVisible(False)
+        self._update_chat_display()
+    
+    def _update_chat_display(self):
+        """Update the chat history display with HTML formatting"""
+        html_content = """
+        <style>
+            .user-msg { 
+                background-color: #e3f2fd; 
+                padding: 10px; 
+                border-radius: 10px; 
+                margin: 5px 50px 5px 5px;
+            }
+            .assistant-msg { 
+                background-color: #f5f5f5; 
+                padding: 10px; 
+                border-radius: 10px; 
+                margin: 5px 5px 5px 50px;
+            }
+            .role-label {
+                font-weight: bold;
+                color: #666;
+                font-size: 11px;
+            }
+            .sql-code {
+                background-color: #263238;
+                color: #80cbc4;
+                padding: 10px;
+                border-radius: 5px;
+                font-family: 'Courier New', monospace;
+                white-space: pre-wrap;
+                margin: 5px 0;
+            }
+            .image-indicator {
+                color: #1976d2;
+                font-style: italic;
+            }
+        </style>
+        """
+        
+        for msg in self.chat_history:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            has_image = msg.get("image") is not None
+            
+            if role == "user":
+                html_content += f"""
+                <div class="user-msg">
+                    <div class="role-label">You</div>
+                    {f'<div class="image-indicator">📎 Image attached</div>' if has_image else ''}
+                    <div>{self._escape_html(content)}</div>
+                </div>
+                """
+            else:
+                # Format assistant message - detect SQL blocks
+                formatted_content = self._format_assistant_content(content)
+                html_content += f"""
+                <div class="assistant-msg">
+                    <div class="role-label">GeoCodex</div>
+                    <div>{formatted_content}</div>
+                </div>
+                """
+        
+        self.chatHistoryDisplay.setHtml(html_content)
+        # Scroll to bottom
+        scrollbar = self.chatHistoryDisplay.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+    
+    def _escape_html(self, text: str) -> str:
+        """Escape HTML special characters"""
+        return (text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\n", "<br>"))
+    
+    def _format_assistant_content(self, content: str) -> str:
+        """Format assistant content, detecting and styling SQL blocks"""
+        import re
+        
+        # Detect SQL code blocks
+        sql_pattern = r'```sql\s*(.*?)\s*```'
+        
+        def replace_sql(match):
+            sql_code = match.group(1)
+            return f'<div class="sql-code">{self._escape_html(sql_code)}</div>'
+        
+        formatted = re.sub(sql_pattern, replace_sql, content, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Also handle plain ``` blocks
+        plain_pattern = r'```\s*(.*?)\s*```'
+        formatted = re.sub(plain_pattern, replace_sql, formatted, flags=re.DOTALL)
+        
+        # Convert remaining newlines to <br>
+        formatted = formatted.replace("\n", "<br>")
+        
+        return formatted
+    
+    def on_attach_image_click(self):
+        """Handle attach image button click"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Image", "", 
+            "Images (*.png *.jpg *.jpeg *.webp *.gif *.bmp)"
+        )
         if file_path:
-            self.imagePathInput.setText(file_path)
-
-    def on_process_agent_click(self):
-        """ Kicks off the image-to-SQL workflow. """
-        self.statusLabel.setText("Status: Starting image-to-SQL workflow...")
-        image_path = self.imagePathInput.text()
-        if not image_path:
-            self.statusLabel.setText("Status: Please select an image file first.")
+            self.attached_image_path = file_path
+            
+            # Show attachment preview
+            self.imageAttachmentFrame.setVisible(True)
+            self.attachmentFileName.setText(os.path.basename(file_path))
+            
+            # Load thumbnail
+            pixmap = QPixmap(file_path)
+            if not pixmap.isNull():
+                scaled = pixmap.scaled(50, 50, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.attachmentThumbnail.setPixmap(scaled)
+    
+    def on_remove_attachment_click(self):
+        """Remove the attached image"""
+        self.attached_image_path = None
+        self.imageAttachmentFrame.setVisible(False)
+        self.attachmentThumbnail.clear()
+    
+    def on_clear_chat_click(self):
+        """Clear chat history"""
+        self.chat_history = []
+        self.current_sql = None
+        self.sqlScriptGroupBox.setVisible(False)
+        self._update_chat_display()
+        self.statusLabel.setText("Status: Chat cleared.")
+    
+    def on_send_message_click(self):
+        """Handle send message button click - async"""
+        message = self.chatMessageInput.toPlainText().strip()
+        
+        if not message and not self.attached_image_path:
+            self.statusLabel.setText("Status: Please enter a message or attach an image.")
             return
-
-        orchestrator = self._get_orchestrator()
-        # Call the new, correct orchestrator method
-        success, result_sql = orchestrator.run_image_to_sql_workflow(image_path)
-
-        if success:
-            # --- THIS IS THE KEY CHANGE ---
-            # Place the resulting SQL into the *SQL output box* on the other tab
-            self.sqlResultOutput.setPlainText(result_sql)
+        
+        # Add user message to history
+        user_msg = {
+            "role": "user",
+            "content": message or "(Image attached)",
+            "image": self.attached_image_path
+        }
+        self.chat_history.append(user_msg)
+        self._update_chat_display()
+        
+        # Clear input
+        self.chatMessageInput.clear()
+        
+        # Store values for the worker thread
+        image_path = self.attached_image_path
+        chat_history_copy = list(self.chat_history)  # Copy for thread safety
+        
+        # Clear attachment UI immediately
+        self.on_remove_attachment_click()
+        
+        # Disable UI during processing
+        self._set_ui_busy(True, "Processing your message...")
+        
+        # Store orchestrator configs
+        interpreter_config = self._get_interpreter_config()
+        coder_config = self._get_coder_config()
+        db_params = self._get_db_params()
+        
+        def do_chat_request():
+            """Worker function to process chat"""
+            orchestrator = WorkflowOrchestrator(
+                interpreter_config=interpreter_config,
+                coder_config=coder_config,
+                db_params=db_params
+            )
             
-            # And also put the user's request into the text box for context
-            self.userQueryInput.setPlainText(f"Generated from image: {os.path.basename(image_path)}")
-
-            # Switch the user's view to the SQL tab so they can see the result
-            self.mainTabWidget.setCurrentIndex(1) # Index 1 is the "Ask Data (SQL)" tab
+            if image_path:
+                # Use DUAL-AGENT flow: Interpreter extracts from image, Coder generates SQL
+                return orchestrator.run_chat_with_image(
+                    message or "Analyze this image and generate the appropriate SQL query.",
+                    image_path,
+                    chat_history_copy
+                )
+            else:
+                # Use text-only chat with history context
+                return orchestrator.run_chat_message(
+                    message,
+                    chat_history_copy
+                )
+        
+        def on_chat_finished(success, response):
+            self._set_ui_busy(False)
             
-            self.statusLabel.setText("Status: SQL generated from image! Please review and execute.")
+            if success:
+                # Add assistant response to history
+                self.chat_history.append({
+                    "role": "assistant",
+                    "content": response
+                })
+                
+                # Check if response contains SQL
+                self._check_for_sql_in_response(response)
+                
+                self.statusLabel.setText("Status: Response received.")
+            else:
+                self.chat_history.append({
+                    "role": "assistant", 
+                    "content": f"⚠️ Error: {response}"
+                })
+                self.statusLabel.setText(f"Status: Error - {response}")
+            
+            self._update_chat_display()
+        
+        def on_chat_error(error_msg):
+            self._set_ui_busy(False)
+            self.chat_history.append({
+                "role": "assistant",
+                "content": f"⚠️ Error: {error_msg}"
+            })
+            self._update_chat_display()
+            self.statusLabel.setText(f"Status: Error - {error_msg}")
+        
+        # Create and start worker
+        self.worker = AsyncWorker(do_chat_request)
+        self.worker.signals.finished.connect(on_chat_finished)
+        self.worker.signals.error.connect(on_chat_error)
+        self.worker.start()
+    
+    def _check_for_sql_in_response(self, response: str):
+        """Check if the response contains SQL and show the SQL panel.
+        If multiple SQL blocks exist, use the LAST one (final solution)."""
+        import re
+        
+        # Find ALL SQL code blocks - take the LAST one (final solution)
+        sql_matches = re.findall(r'```sql\s*(.*?)\s*```', response, re.DOTALL | re.IGNORECASE)
+        
+        if sql_matches:
+            # Take the LAST SQL block - this is typically the final solution
+            sql_code = sql_matches[-1].strip()
+            self.current_sql = sql_code
+            self.chatSqlOutput.setPlainText(sql_code)
+            self.sqlScriptGroupBox.setVisible(True)
         else:
-            self.statusLabel.setText(f"Status: Workflow Error - {result_sql}")
+            # Also check for SELECT/INSERT/UPDATE/DELETE statements without code blocks
+            # Find all and take the last one
+            sql_keywords = re.findall(
+                r'(SELECT\s+.+?FROM\s+.+?(?:;|\n\n|$))',
+                response, 
+                re.DOTALL | re.IGNORECASE
+            )
+            if sql_keywords:
+                sql_code = sql_keywords[-1].strip().rstrip(';') + ';'
+                self.current_sql = sql_code
+                self.chatSqlOutput.setPlainText(sql_code)
+                self.sqlScriptGroupBox.setVisible(True)
+    
+    def on_copy_sql_click(self):
+        """Copy SQL to clipboard"""
+        if self.current_sql:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(self.current_sql)
+            self.statusLabel.setText("Status: SQL copied to clipboard!")
+    
+    def on_run_sql_from_chat_click(self):
+        """Execute the SQL from chat with auto-fix capability"""
+        sql_query = self.chatSqlOutput.toPlainText().strip()
+        if not sql_query:
+            self.statusLabel.setText("Status: No SQL to execute.")
+            return
+        
+        # Disable UI during execution
+        self._set_ui_busy(True, "Executing SQL (with auto-fix enabled)...")
+        
+        # Add a processing message to chat
+        self.chat_history.append({
+            "role": "assistant",
+            "content": "🔄 Executing SQL query..."
+        })
+        self._update_chat_display()
+        
+        layer_name = "GeoCodex Query Result"
+        
+        # Store configs for worker
+        interpreter_config = self._get_interpreter_config()
+        coder_config = self._get_coder_config()
+        db_params = self._get_db_params()
+        
+        def do_execute_with_auto_fix():
+            """Worker function to execute SQL with auto-fix"""
+            from .geo_codex_logic.orchestrator import WorkflowOrchestrator
+            orchestrator = WorkflowOrchestrator(
+                interpreter_config=interpreter_config,
+                coder_config=coder_config,
+                db_params=db_params
+            )
+            # Use the new auto-fix method with max 3 retries
+            success, message, final_sql = orchestrator.run_sql_with_auto_fix(
+                sql_query, layer_name, max_retries=3
+            )
+            # Return as tuple with the final SQL
+            return success, f"{message}|||{final_sql}"
+        
+        def on_execute_finished(success, result):
+            self._set_ui_busy(False)
+            
+            # Remove the "Executing..." message
+            if self.chat_history and "🔄 Executing" in self.chat_history[-1].get("content", ""):
+                self.chat_history.pop()
+            
+            # Parse result (message|||final_sql)
+            parts = result.split("|||")
+            message = parts[0]
+            final_sql = parts[1] if len(parts) > 1 else sql_query
+            
+            if success:
+                # Update the SQL panel with the final (possibly fixed) SQL
+                if final_sql != sql_query:
+                    self.current_sql = final_sql
+                    self.chatSqlOutput.setPlainText(final_sql)
+                    self.chat_history.append({
+                        "role": "assistant",
+                        "content": f"✅ {message}\n\n**Note:** The SQL was automatically corrected. The fixed query is shown in the SQL panel."
+                    })
+                else:
+                    self.chat_history.append({
+                        "role": "assistant",
+                        "content": f"✅ {message}"
+                    })
+            else:
+                self.chat_history.append({
+                    "role": "assistant",
+                    "content": f"❌ Execution failed: {message}\n\nYou can try modifying the query manually or ask me to regenerate it."
+                })
+            
+            self._update_chat_display()
+            self.statusLabel.setText(f"Status: {message[:100]}")
+        
+        def on_execute_error(error_msg):
+            self._set_ui_busy(False)
+            
+            # Remove the "Executing..." message
+            if self.chat_history and "🔄 Executing" in self.chat_history[-1].get("content", ""):
+                self.chat_history.pop()
+            
+            self.chat_history.append({
+                "role": "assistant",
+                "content": f"❌ Error: {error_msg}"
+            })
+            self._update_chat_display()
+            self.statusLabel.setText(f"Status: Error - {error_msg}")
+        
+        # Create and start worker
+        self.worker = AsyncWorker(do_execute_with_auto_fix)
+        self.worker.signals.finished.connect(on_execute_finished)
+        self.worker.signals.error.connect(on_execute_error)
+        self.worker.start()
+    
+    def on_hide_sql_panel_click(self):
+        """Hide the SQL panel"""
+        self.sqlScriptGroupBox.setVisible(False)
