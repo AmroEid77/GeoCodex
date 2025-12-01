@@ -341,7 +341,7 @@ This project is licensed under the GPL v2 License - see the [LICENSE](LICENSE) f
 ## 👥 Authors
 
 - **Amro Eid** - *Initial work & Development* - [AmroEid77](https://github.com/AmroEid77)
-- **Ahmad** - *Contributor* [Ahmad]https://github.com/AhmadHudhud83
+- **Ahmad** - *Contributor* - [Ahmad](https://github.com/AhmadHudhud83)
 
 ---
 
