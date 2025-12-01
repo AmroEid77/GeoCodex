@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>600</width>
-    <height>700</height>
+    <width>650</width>
+    <height>800</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -25,48 +25,207 @@
        <string>Configuration</string>
       </attribute>
       <layout class="QVBoxLayout" name="verticalLayout_config">
+       <!-- INTERPRETER MODEL (Vision) -->
        <item>
-        <widget class="QGroupBox" name="groupBox_llm">
+        <widget class="QGroupBox" name="groupBox_interpreter">
          <property name="title">
-          <string>LLM Provider Settings</string>
+          <string>Interpreter Model (Vision-capable)</string>
          </property>
-         <layout class="QFormLayout" name="formLayout_llm">
+         <layout class="QFormLayout" name="formLayout_interpreter">
           <item row="0" column="0">
-           <widget class="QLabel" name="label_apiKey">
+           <widget class="QLabel" name="label_interpreterProvider">
+            <property name="text">
+             <string>Provider:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QComboBox" name="interpreterProviderCombo">
+            <item>
+             <property name="text">
+              <string>OpenAI (ChatGPT)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Anthropic (Claude)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Google (Gemini)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>NVIDIA AI</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>OpenRouter</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Ollama (Local)</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_interpreterApiKey">
             <property name="text">
              <string>API Key:</string>
             </property>
            </widget>
           </item>
-          <item row="0" column="1">
-           <widget class="QLineEdit" name="apiKeyInput">
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="interpreterApiKeyInput">
             <property name="echoMode">
              <enum>QLineEdit::Password</enum>
             </property>
             <property name="placeholderText">
-             <string>sk-...</string>
+             <string>Enter API key (not needed for Ollama)</string>
             </property>
            </widget>
           </item>
-          <item row="1" column="0">
-           <widget class="QLabel" name="label_model">
+          <item row="2" column="0">
+           <widget class="QLabel" name="label_interpreterModel">
             <property name="text">
              <string>Model:</string>
             </property>
            </widget>
           </item>
+          <item row="2" column="1">
+           <widget class="QComboBox" name="interpreterModelCombo">
+            <property name="editable">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="label_interpreterBaseUrl">
+            <property name="text">
+             <string>Base URL:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QLineEdit" name="interpreterBaseUrlInput">
+            <property name="placeholderText">
+             <string>Optional: Custom endpoint URL</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <!-- USE SAME MODEL CHECKBOX -->
+       <item>
+        <widget class="QCheckBox" name="useSameModelCheckbox">
+         <property name="text">
+          <string>Use same model for both Interpreter and Coder</string>
+         </property>
+         <property name="checked">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <!-- CODER MODEL -->
+       <item>
+        <widget class="QGroupBox" name="groupBox_coder">
+         <property name="title">
+          <string>Coder Model (SQL Generation)</string>
+         </property>
+         <property name="enabled">
+          <bool>false</bool>
+         </property>
+         <layout class="QFormLayout" name="formLayout_coder">
+          <item row="0" column="0">
+           <widget class="QLabel" name="label_coderProvider">
+            <property name="text">
+             <string>Provider:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QComboBox" name="coderProviderCombo">
+            <item>
+             <property name="text">
+              <string>OpenAI (ChatGPT)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Anthropic (Claude)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Google (Gemini)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>NVIDIA AI</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>OpenRouter</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Ollama (Local)</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_coderApiKey">
+            <property name="text">
+             <string>API Key:</string>
+            </property>
+           </widget>
+          </item>
           <item row="1" column="1">
-           <widget class="QComboBox" name="modelCombo">
-            <item>
-             <property name="text">
-              <string>GPT-4o</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Claude 3 Opus</string>
-             </property>
-            </item>
+           <widget class="QLineEdit" name="coderApiKeyInput">
+            <property name="echoMode">
+             <enum>QLineEdit::Password</enum>
+            </property>
+            <property name="placeholderText">
+             <string>Enter API key (not needed for Ollama)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="label_coderModel">
+            <property name="text">
+             <string>Model:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QComboBox" name="coderModelCombo">
+            <property name="editable">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="label_coderBaseUrl">
+            <property name="text">
+             <string>Base URL:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QLineEdit" name="coderBaseUrlInput">
+            <property name="placeholderText">
+             <string>Optional: Custom endpoint URL</string>
+            </property>
            </widget>
           </item>
          </layout>
@@ -234,79 +393,238 @@
        </item>
       </layout>
      </widget>
-     <!-- TAB 3: IMAGE AGENT WORKFLOW -->
-     <widget class="QWidget" name="tab_agent">
+     <!-- TAB 3: GEOCODEX CHAT -->
+     <widget class="QWidget" name="tab_chat">
       <attribute name="title">
-       <string>Workflow Agent (Image)</string>
+       <string>GeoCodex</string>
       </attribute>
-      <layout class="QVBoxLayout" name="verticalLayout_agent">
+      <layout class="QVBoxLayout" name="verticalLayout_chat">
+       <!-- Chat History Display -->
        <item>
-        <widget class="QGroupBox" name="groupBox_imgInput">
-         <property name="title">
-          <string>Upload Workflow Diagram</string>
+        <widget class="QTextBrowser" name="chatHistoryDisplay">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>3</verstretch>
+          </sizepolicy>
          </property>
-         <layout class="QHBoxLayout" name="horizontalLayout_img">
+         <property name="openExternalLinks">
+          <bool>false</bool>
+         </property>
+         <property name="placeholderText">
+          <string>Chat history will appear here...</string>
+         </property>
+        </widget>
+       </item>
+       <!-- Image Attachment Preview -->
+       <item>
+        <widget class="QFrame" name="imageAttachmentFrame">
+         <property name="frameShape">
+          <enum>QFrame::StyledPanel</enum>
+         </property>
+         <property name="frameShadow">
+          <enum>QFrame::Raised</enum>
+         </property>
+         <property name="visible">
+          <bool>false</bool>
+         </property>
+         <layout class="QHBoxLayout" name="horizontalLayout_attachment">
+          <property name="leftMargin">
+           <number>5</number>
+          </property>
+          <property name="topMargin">
+           <number>5</number>
+          </property>
+          <property name="rightMargin">
+           <number>5</number>
+          </property>
+          <property name="bottomMargin">
+           <number>5</number>
+          </property>
           <item>
-           <widget class="QLineEdit" name="imagePathInput">
-            <property name="placeholderText">
-             <string>Select an image file...</string>
+           <widget class="QLabel" name="attachmentThumbnail">
+            <property name="minimumSize">
+             <size>
+              <width>50</width>
+              <height>50</height>
+             </size>
             </property>
-            <property name="readOnly">
+            <property name="maximumSize">
+             <size>
+              <width>50</width>
+              <height>50</height>
+             </size>
+            </property>
+            <property name="text">
+             <string/>
+            </property>
+            <property name="scaledContents">
              <bool>true</bool>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QPushButton" name="browseImgBtn">
+           <widget class="QLabel" name="attachmentFileName">
             <property name="text">
-             <string>Browse...</string>
+             <string>image.png</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer_attachment">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="QPushButton" name="removeAttachmentBtn">
+            <property name="text">
+             <string>✕</string>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
          </layout>
         </widget>
        </item>
+       <!-- SQL Script Panel (hidden by default) -->
        <item>
-        <widget class="QPushButton" name="processAgentBtn">
-         <property name="text">
-          <string>▼ Analyze Image &amp; Generate PyQGIS Code ▼</string>
-         </property>
-         <property name="font">
-          <font>
-           <weight>75</weight>
-           <bold>true</bold>
-          </font>
-         </property>
-         <property name="styleSheet">
-           <string notr="true">background-color: #2196F3; color: white; padding: 8px;</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QGroupBox" name="groupBox_agentOutput">
+        <widget class="QGroupBox" name="sqlScriptGroupBox">
          <property name="title">
-          <string>Agent Generated Code</string>
+          <string>Generated SQL Script</string>
          </property>
-         <layout class="QVBoxLayout" name="verticalLayout_agentOut">
+         <property name="visible">
+          <bool>false</bool>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_sqlScript">
           <item>
-           <widget class="QPlainTextEdit" name="agentCodeOutput">
+           <widget class="QPlainTextEdit" name="chatSqlOutput">
+            <property name="maximumSize">
+             <size>
+              <width>16777215</width>
+              <height>150</height>
+             </size>
+            </property>
             <property name="font">
              <font>
               <family>Courier New</family>
-              <pointsize>10</pointsize>
+              <pointsize>9</pointsize>
              </font>
             </property>
             <property name="placeholderText">
-             <string>PyQGIS code will appear here...</string>
+             <string>SQL script will appear here...</string>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QPushButton" name="runAgentCodeBtn">
-            <property name="text">
-             <string>▶ Run PyQGIS Script</string>
+           <layout class="QHBoxLayout" name="horizontalLayout_sqlBtns">
+            <item>
+             <widget class="QPushButton" name="copySqlBtn">
+              <property name="text">
+               <string>📋 Copy SQL</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="runSqlFromChatBtn">
+              <property name="text">
+               <string>▶ Execute SQL</string>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">background-color: #4CAF50; color: white;</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="hideSqlPanelBtn">
+              <property name="text">
+               <string>Hide</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <!-- Message Input Area -->
+       <item>
+        <widget class="QGroupBox" name="groupBox_chatInput">
+         <property name="title">
+          <string>Message</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_chatInput">
+          <item>
+           <widget class="QPlainTextEdit" name="chatMessageInput">
+            <property name="maximumSize">
+             <size>
+              <width>16777215</width>
+              <height>80</height>
+             </size>
+            </property>
+            <property name="placeholderText">
+             <string>Type your message... (You can ask questions, describe GIS tasks, or attach images)</string>
             </property>
            </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_chatBtns">
+            <item>
+             <widget class="QPushButton" name="attachImageBtn">
+              <property name="text">
+               <string>📎 Attach Image</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="horizontalSpacer_chat">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QPushButton" name="clearChatBtn">
+              <property name="text">
+               <string>Clear Chat</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="sendMessageBtn">
+              <property name="text">
+               <string>Send ▶</string>
+              </property>
+              <property name="font">
+               <font>
+                <weight>75</weight>
+                <bold>true</bold>
+               </font>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">background-color: #2196F3; color: white; padding: 8px 16px;</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
           </item>
          </layout>
         </widget>
