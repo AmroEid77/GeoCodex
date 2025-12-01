@@ -27,8 +27,24 @@ import sys
 
 plugin_dir = os.path.dirname(__file__)
 vendor_dir = os.path.join(plugin_dir, 'vendor')
+
+# Insert vendor dir at the very beginning of sys.path
 if vendor_dir not in sys.path:
     sys.path.insert(0, vendor_dir)
+
+# Force reload of langchain modules to ensure we use vendor versions
+# This is needed because QGIS may have cached old versions from previous sessions
+def _force_reload_vendor_modules():
+    """Remove any cached langchain modules so vendor versions are loaded."""
+    modules_to_remove = [
+        key for key in list(sys.modules.keys())
+        if key.startswith(('langchain', 'ollama', 'openai', 'anthropic', 'google'))
+        and key in sys.modules
+    ]
+    for mod in modules_to_remove:
+        del sys.modules[mod]
+
+_force_reload_vendor_modules()
 
 
 # noinspection PyPep8Naming
