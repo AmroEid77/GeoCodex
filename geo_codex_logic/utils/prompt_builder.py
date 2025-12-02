@@ -30,14 +30,12 @@ STEP 2: IDENTIFY SPATIAL RELATIONSHIPS
 - "boundary" or "touches" → ST_Touches()
 - For ADVANCED/PRECISE topology → Use DE-9IM with ST_Relate()
 
-STEP 3: HANDLE COORDINATE SYSTEMS CORRECTLY
-- Check if data is in geographic coordinates (SRID 4326, 4269, 4267) vs projected
-- For DISTANCE CALCULATIONS: Always transform to appropriate projected CRS
-- Use ST_Transform(geom, target_srid) before distance operations
-- Common projected CRS: 
-  * USA: EPSG:2163 (US National Atlas), State Plane zones
-  * World: UTM zones based on location
-- Distance in geographic coords is in DEGREES (wrong!), projected is in meters/feet
+STEP 3: HANDLE COORDINATE SYSTEMS (The 'Where am I?' Rule)
+- **NEVER hardcode specific SRIDs** (like 2163 or 3857) unless explicitly told.
+- Assume data might use a local metric projection.
+- If measuring distance (meters/feet), check if data is projected.
+- If transformation is needed, use a placeholder like `ST_Transform(geom, <LOCAL_EPSG>)` or ask the user.
+- **NEVER assume SRIDs match**. Always suggest checking ST_SRID first.
 
 STEP 4: BUILD INCREMENTALLY WITH CTEs
 For complex multi-criteria analysis, use WITH clauses:
@@ -55,6 +53,22 @@ STEP 5: VERIFY LOGIC
 - Use DISTINCT if spatial joins could create duplicates
 - Verify the geometry column is included for mapping
 
+STEP 6: IDENTIFIER & TEXT SAFETY (The 'Quote' & 'Hyphen' Rules)
+- **IDENTIFIER SAFETY**: Never assume lowercase columns. Many Shapefiles have UPPERCASE columns.
+  - Action: Always check schema casing. If unsure, wrap columns in double quotes (e.g., "AREA").
+- **AGGRESSIVE TEXT MATCHING (Root Word Strategy)**:
+  - Never match full words if data is dirty. Match the *invariant root*.
+  - **Hyphen/Space Rule**: `Un-Used` vs `Unused` → Match `%used%`.
+  - **Suffix Rule**: `Agriculture` vs `Agricultural` → Match `%agri%`.
+  - **Bad**: `ILIKE '%agriculture%'` (Misses 'Agricultural')
+  - **Good**: `ILIKE '%agri%'` (Matches both)
+- **DIAGNOSTIC FIRST**: If a query might fail or return 0 rows, provide a diagnostic query:
+  - `SELECT DISTINCT "ColumnName" FROM table LIMIT 20;`
+
+STEP 7: TOPOLOGICAL SAFETY (The 'Overlap' Rule)
+- **NEVER use ST_Within for exclusion**. It ignores partial overlaps.
+- Action: Always use `NOT ST_Intersects` to ensure features don't touch at all.
+
 ═══════════════════════════════════════════════════════════════════════════════
 SPATIAL ANALYSIS PATTERNS:
 ═══════════════════════════════════════════════════════════════════════════════
@@ -63,27 +77,27 @@ PATTERN 1: Multi-Criteria Site Selection
 When selecting locations based on multiple criteria across different tables:
 - First filter each table independently by its criteria
 - Then perform spatial joins between filtered results
-- Use EXISTS or IN for "must have at least one nearby" criteria
-
 PATTERN 2: Proximity Analysis (within X distance)
--- CORRECT way with coordinate transformation:
+-- CORRECT way (assuming projected data or using placeholder):
 ST_DWithin(
-  ST_Transform(a.geom, 2163),  -- Transform to projected CRS
-  ST_Transform(b.geom, 2163),
-  16093.4  -- 10 miles in meters
+  a.geom, 
+  b.geom,
+  16093.4  -- 10 miles in meters (ensure CRS is projected!)
 )
 
 PATTERN 3: "At least one" spatial relationship
 -- Find cities with at least one park within 10 miles:
 WHERE EXISTS (
   SELECT 1 FROM parks p 
-  WHERE ST_DWithin(ST_Transform(cities.geom, 2163), ST_Transform(p.geom, 2163), 16093.4)
+  WHERE ST_DWithin(cities.geom, p.geom, 16093.4)
 )
 
 PATTERN 4: Aggregation with Spatial Criteria
 -- Count features within distance:
 SELECT c.name, COUNT(p.id) as park_count
 FROM cities c
+LEFT JOIN parks p ON ST_DWithin(c.geom, p.geom, 16093.4)
+GROUP BY c.id, c.name
 LEFT JOIN parks p ON ST_DWithin(ST_Transform(c.geom, 2163), ST_Transform(p.geom, 2163), 16093.4)
 GROUP BY c.id, c.name
 
@@ -236,14 +250,23 @@ METHODOLOGY:
 
 1. ANALYZE ALL STEPS FIRST - understand the complete workflow before writing SQL
 2. USE CTEs (WITH clause) to build complex queries incrementally
-3. HANDLE COORDINATE SYSTEMS:
-   - For distance operations, transform to projected CRS (e.g., EPSG:2163 for USA)
-   - ST_DWithin(ST_Transform(a.geom, 2163), ST_Transform(b.geom, 2163), distance_meters)
+3. HANDLE COORDINATE SYSTEMS (The 'Where am I?' Rule):
+   - **NEVER hardcode SRIDs** (like 2163). Assume local metric projection or ask.
+   - If transformation needed: `ST_Transform(geom, <LOCAL_EPSG>)`.
+   - **NEVER assume SRIDs match**. Explicitly transform both geometries.
 4. APPLY CRITERIA IN LOGICAL ORDER:
    - Filter by attributes first (faster)
-   - Then apply spatial operations (more expensive)
-5. USE EXISTS for "at least one nearby" conditions
-6. Include DISTINCT if spatial joins could create duplicates
+7. IDENTIFIER & TEXT SAFETY (The 'Quote' & 'Hyphen' Rules):
+   - **IDENTIFIER SAFETY**: Check schema casing. Wrap columns in double quotes if unsure (e.g., "AREA").
+   - **AGGRESSIVE TEXT MATCHING**: Match roots, not words.
+     - `Un-Used` → `%used%`
+     - `Agricultural` → `%agri%`
+   - **DIAGNOSTIC**: If unsure of values, suggest `SELECT DISTINCT "Column" ...`.
+   - **IDENTIFIER SAFETY**: Check schema casing. Wrap columns in double quotes if unsure (e.g., "AREA").
+   - **AGGRESSIVE TEXT MATCHING**: Use broad wildcards. `ILIKE '%used%'` (not `%unused%`).
+   - **DIAGNOSTIC**: If unsure of values, suggest `SELECT DISTINCT "Column" ...`.
+8. TOPOLOGICAL SAFETY (The 'Overlap' Rule):
+   - **NEVER use ST_Within for exclusion**. Use `NOT ST_Intersects`.
 
 ═══════════════════════════════════════════════════════════════════════════════
 DISTANCE REFERENCE:
@@ -267,7 +290,7 @@ WITH
     SELECT DISTINCT cic.* FROM cities_in_counties cic
     WHERE EXISTS (
       SELECT 1 FROM highways h
-      WHERE ST_DWithin(ST_Transform(cic.geom, 2163), ST_Transform(h.geom, 2163), 32186.9)
+      WHERE ST_DWithin(cic.geom, h.geom, 32186.9) -- Ensure projected CRS!
     )
   )
 SELECT * FROM cities_near_highways
@@ -334,18 +357,29 @@ FOR MULTI-CRITERIA ANALYSIS:
 6. Include DISTINCT to avoid duplicates from spatial joins
 
 FOR DISTANCE CALCULATIONS:
-- ALWAYS transform to projected CRS for accurate distances
-- Geographic coords (4326, 4269, 4267) measure in DEGREES (wrong!)
-- Use: ST_DWithin(ST_Transform(a.geom, 2163), ST_Transform(b.geom, 2163), meters)
+- **NEVER hardcode SRIDs** (like 2163). Assume local metric projection or ask.
+- Geographic coords (4326) measure in DEGREES (wrong!).
+- Use: `ST_DWithin(a.geom, b.geom, meters)` (assuming projected).
 - 1 mile = 1609.34m | 10 miles = 16093.4m | 20 miles = 32186.9m
+FOR IDENTIFIER & TEXT SAFETY:
+- **IDENTIFIER SAFETY**: Check schema casing. Wrap columns in double quotes if unsure (e.g., "AREA").
+- **AGGRESSIVE TEXT MATCHING**: Match roots, not words.
+  - `Un-Used` → `%used%`
+  - `Agricultural` → `%agri%`
+- **DIAGNOSTIC**: If unsure of values, suggest `SELECT DISTINCT "Column" ...`. unsure (e.g., "AREA").
+- **AGGRESSIVE TEXT MATCHING**: Use broad wildcards. `ILIKE '%used%'` (not `%unused%`).
+- **DIAGNOSTIC**: If unsure of values, suggest `SELECT DISTINCT "Column" ...`.
+
+FOR TOPOLOGICAL SAFETY:
+- **NEVER use ST_Within for exclusion**. Use `NOT ST_Intersects`.
 
 FOR PROXIMITY ("within X miles"):
 ```sql
 WHERE EXISTS (
   SELECT 1 FROM other_table o
   WHERE ST_DWithin(
-    ST_Transform(main.geom, 2163),
-    ST_Transform(o.geom, 2163),
+    main.geom,
+    o.geom,
     distance_in_meters
   )
 )
