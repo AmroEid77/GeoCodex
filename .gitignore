@@ -12,4 +12,4 @@ build/
 dist/
 data/fire_creek/
 *.egg-info/
-
+output/
