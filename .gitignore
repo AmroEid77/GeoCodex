@@ -10,6 +10,6 @@ __pycache__/
 # Build artifacts
 build/
 dist/
-data/fire_creek/
+
 *.egg-info/
-output/
+
