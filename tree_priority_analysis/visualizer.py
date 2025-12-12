@@ -359,13 +359,104 @@ class Visualizer:
         self.log(f"✓ Factor comparison plot created")
         return output_path
     
+    def create_qgis_style(
+        self,
+        result: gpd.GeoDataFrame,
+        output_path: str = None
+    ) -> str:
+        """
+        Create a QGIS .qml style file matching the visualization
+        
+        Args:
+            result: GeoDataFrame with priority analysis results
+            output_path: Output QML path
+            
+        Returns:
+            Path to created QML file
+        """
+        from .config import COLOR_MAP, PRIORITY_CLASSES
+        
+        if output_path is None:
+            output_path = os.path.join(OUTPUT_DIR, 'tree_priority_style.qml')
+        
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        self.log(f"Creating QGIS style file: {output_path}")
+        
+        # Build QML content
+        qml_content = '''<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
+    <qgis version="3.28" styleCategories="Symbology">
+    <renderer-v2 type="categorizedSymbol" attr="prior_cls" forceraster="0" enableorderby="0">
+        <categories>
+    '''
+        
+        # Add category for each priority class
+        priority_order = ['Very High', 'High', 'Medium', 'Low', 'Very Low']
+        for idx, priority_class in enumerate(priority_order):
+            color = COLOR_MAP[priority_class]
+            # Convert hex to RGB
+            rgb = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
+            
+            qml_content += f'''      <category render="true" symbol="{idx}" value="{priority_class}" label="{priority_class}"/>
+    '''
+        
+        qml_content += '''    </categories>
+        <symbols>
+    '''
+        
+        # Add symbols for each category
+        for idx, priority_class in enumerate(priority_order):
+            color = COLOR_MAP[priority_class]
+            rgb = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
+            
+            qml_content += f'''      <symbol type="fill" name="{idx}" alpha="0.7" force_rhr="0" clip_to_extent="1">
+            <data_defined_properties>
+            <Option type="Map">
+                <Option type="QString" name="name" value=""/>
+                <Option name="properties"/>
+                <Option type="QString" name="type" value="collection"/>
+            </Option>
+            </data_defined_properties>
+            <layer pass="0" locked="0" enabled="1" class="SimpleFill">
+            <Option type="Map">
+                <Option type="QString" name="border_width_map_unit_scale" value="3x:0,0,0,0,0,0"/>
+                <Option type="QString" name="color" value="{rgb[0]},{rgb[1]},{rgb[2]},178"/>
+                <Option type="QString" name="joinstyle" value="bevel"/>
+                <Option type="QString" name="offset" value="0,0"/>
+                <Option type="QString" name="offset_map_unit_scale" value="3x:0,0,0,0,0,0"/>
+                <Option type="QString" name="offset_unit" value="MM"/>
+                <Option type="QString" name="outline_color" value="35,35,35,255"/>
+                <Option type="QString" name="outline_style" value="solid"/>
+                <Option type="QString" name="outline_width" value="0.5"/>
+                <Option type="QString" name="outline_width_unit" value="MM"/>
+                <Option type="QString" name="style" value="solid"/>
+            </Option>
+            </layer>
+        </symbol>
+    '''
+        
+        qml_content += '''    </symbols>
+    </renderer-v2>
+    <blendMode>0</blendMode>
+    <featureBlendMode>0</featureBlendMode>
+    <layerOpacity>1</layerOpacity>
+    </qgis>
+    '''
+        
+        # Write to file
+        with open(output_path, 'w') as f:
+            f.write(qml_content)
+        
+        self.log(f"✓ QGIS style file created")
+        return output_path
+    
     def export_all(
         self,
         result: gpd.GeoDataFrame,
         create_maps: bool = True
     ) -> dict:
         """
-        Export all outputs (shapefile, CSV, maps)
+        Export all outputs (shapefile, CSV, maps, QGIS style)
         
         Args:
             result: GeoDataFrame with analysis results
@@ -386,6 +477,9 @@ class Visualizer:
         # Export CSV
         outputs['csv'] = self.export_csv(result)
         
+        # Create QGIS style file
+        outputs['qgis_style'] = self.create_qgis_style(result)
+        
         if create_maps:
             # Create static map
             outputs['static_map'] = self.create_static_map(result)
@@ -402,5 +496,11 @@ class Visualizer:
         self.log("\nOutput files:")
         for output_type, path in outputs.items():
             self.log(f"  {output_type:15} : {path}")
+        
+        self.log("\n💡 To use in QGIS:")
+        self.log("  1. Load: output/tree_priority_result.shp")
+        self.log("  2. Right-click layer → Properties → Style")
+        self.log("  3. Style (bottom left) → Load Style")
+        self.log("  4. Select: output/tree_priority_style.qml")
         
         return outputs
