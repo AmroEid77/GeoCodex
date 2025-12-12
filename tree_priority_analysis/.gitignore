@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Data (keep structure, ignore actual files)
+data/fire_creek/*.shp
+data/fire_creek/*.dbf
+data/fire_creek/*.shx
+data/fire_creek/*.prj
+data/fire_creek/*.sbn
+data/fire_creek/*.sbx
+data/fire_creek/*.cpg
+data/fire_creek/*.xml
+
+# Keep data directory structure
+!data/fire_creek/.gitkeep
+
+# Outputs
+output/*.shp
+output/*.dbf
+output/*.shx
+output/*.prj
+output/*.cpg
+output/*.csv
+output/*.html
+output/*.png
+
+# Keep output directory structure
+!output/.gitkeep
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
