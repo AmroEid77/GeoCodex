@@ -10,7 +10,7 @@ import os
 # ═══════════════════════════════════════════════════════════════
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, 'data', 'fire_creek')
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, 'output')
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, 'output', 'tree_cutting_priority_analysis')
 
 # ═══════════════════════════════════════════════════════════════
 # INPUT DATA PATHS

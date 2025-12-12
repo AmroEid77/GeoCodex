@@ -1,0 +1,48 @@
+GeoCodex/
+└── skiing_resort_analysis/
+    ├── __init__.py
+    ├── config.py                    # Configuration & thresholds
+    ├── main.py                      # Main orchestrator
+    ├── data_loader.py               # Load rasters & vectors
+    ├── README.md                    # Documentation
+    ├── requirements.txt             # Dependencies
+    ├── test_run.py                  # Test script
+    │
+    ├── interpolation/               # Task 1
+    │   ├── __init__.py
+    │   ├── idw_interpolator.py     # Inverse Distance Weighting
+    │   ├── kriging_interpolator.py # Kriging
+    │   ├── spline_interpolator.py  # Spline
+    │   ├── validator.py            # Cross-validation
+    │   └── base_interpolator.py    # Abstract base
+    │
+    ├── site_selection/              # Task 2
+    │   ├── __init__.py
+    │   ├── slope_analyzer.py       # Slope calculation
+    │   ├── aspect_analyzer.py      # Aspect/orientation
+    │   ├── shading_analyzer.py     # Hillshade/shading
+    │   └── suitability_model.py    # Combine criteria
+    │
+    ├── visualizer.py                # Export & visualization
+    └── utils/
+        ├── __init__.py
+        ├── raster_utils.py          # Raster operations
+        └── validation_metrics.py    # RMSE, MAE, etc.
+
+data/
+└── skiing_resort/
+    ├── arelev1.tif                  # DEM
+    ├── snowpoint.shp                # Snow stations
+    ├── DamLine.shp                  # Dam location
+    ├── ridges.shp                   # Ridge lines
+    └── cont.shp                     # Contours
+
+output/
+└── skiing_resort/
+    ├── snow_interpolated_idw.tif
+    ├── snow_interpolated_kriging.tif
+    ├── validation_results.csv
+    ├── slope_map.tif
+    ├── aspect_map.tif
+    ├── shading_map.tif
+    └── suitability_map.tif
