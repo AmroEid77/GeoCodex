@@ -348,7 +348,7 @@ This project is licensed under the GPL v2 License - see the [LICENSE](LICENSE) f
 ## 👥 Authors
 
 - **Amro Eid** - _Initial work & Development_ - [AmroEid77](https://github.com/AmroEid77)
-- **Ahmad** - _Contributor_
+- **Ahmad** - _Contributor_ - [AhmadHudhud83](https://github.com/AhmadHudhud83)
 
 ---
 
@@ -365,7 +365,7 @@ This project is licensed under the GPL v2 License - see the [LICENSE](LICENSE) f
 
 - **Issues**: [GitHub Issues](https://github.com/AmroEid77/GeoCodex/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/AmroEid77/GeoCodex/discussions)
-- **Email**: amro.eidd@gmail.com
+- **Emails**: amro.eidd@gmail.com, ahmadhudhud1212@gmail.com
 
 ---
 
