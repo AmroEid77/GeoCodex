@@ -27,6 +27,24 @@ class DataLoader:
         self.dem_transform = None
         self.dem_meta = None
         self.snow_points = None
+    
+    def _detect_field(self, gdf, preferred_name, alternatives):
+        """
+        Detect field name case-insensitively
+        
+        Args:
+            gdf: GeoDataFrame
+            preferred_name: Preferred field name
+            alternatives: List of alternative names to try
+            
+        Returns:
+            Actual field name found, or None
+        """
+        all_options = [preferred_name] + alternatives
+        for option in all_options:
+            if option in gdf.columns:
+                return option
+        return None
         
     def load_dem(self, dem_path: str = None) -> Tuple[np.ndarray, rasterio.Affine, dict]:
         """
@@ -92,9 +110,14 @@ class DataLoader:
         # Load shapefile
         gdf = gpd.read_file(snow_path)
         
-        # Validate required fields
-        if SNOW_DEPTH_FIELD not in gdf.columns:
-            raise ValueError(f"Required field '{SNOW_DEPTH_FIELD}' not found in snow points")
+        # Detect snow depth field (case-insensitive)
+        snow_field = self._detect_field(gdf, SNOW_DEPTH_FIELD, 
+                                        ['snowdepth', 'SNOWDEPTH', 'snow_depth', 'SNOW_DEPTH'])
+        if snow_field is None:
+            raise ValueError(f"Snow depth field not found. Tried: {SNOW_DEPTH_FIELD}, snowdepth, SNOWDEPTH")
+        
+        # Use detected field name
+        actual_snow_field = snow_field
         
         # Check CRS
         print(f"  Original CRS: {gdf.crs}")
@@ -109,10 +132,15 @@ class DataLoader:
         
         # Remove points with null snow depth
         original_count = len(gdf)
-        gdf = gdf[gdf[SNOW_DEPTH_FIELD].notna()]
+        gdf = gdf[gdf[actual_snow_field].notna()]
         removed = original_count - len(gdf)
         if removed > 0:
             print(f"  Removed {removed} points with null snow depth")
+        
+        # Normalize field name to expected name
+        if actual_snow_field != SNOW_DEPTH_FIELD:
+            gdf = gdf.rename(columns={actual_snow_field: SNOW_DEPTH_FIELD})
+            print(f"  Renamed field '{actual_snow_field}' → '{SNOW_DEPTH_FIELD}'")
         
         # Extract coordinates
         gdf['x'] = gdf.geometry.x

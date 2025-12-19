@@ -55,10 +55,11 @@ OUTPUT_FILES = {
 }
 
 # ═══════════════════════════════════════════════════════════════
-# FIELD NAMES
+# FIELD NAMES (Shapefile schema - uppercase, auto-detected)
 # ═══════════════════════════════════════════════════════════════
-SNOW_DEPTH_FIELD = 'SNOWDEPTH'  # Field name in snowpoint.shp (uppercase)
-STATION_ID_FIELD = 'STATION'     # Station ID field (uppercase)
+SNOW_DEPTH_FIELD = 'SNOWDEPTH'  # Field name in snowpoint shapefile
+STATION_ID_FIELD = 'STATION'     # Station ID field
+CONTOUR_FIELD = 'CONTOUR'        # Contour elevation field
 
 # ═══════════════════════════════════════════════════════════════
 # INTERPOLATION PARAMETERS
