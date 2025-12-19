@@ -357,12 +357,12 @@ class SkiingResortAnalysis:
             suitable_areas.to_file(OUTPUT_FILES['suitable_areas'])
             print(f"✓ Suitable areas saved to: {OUTPUT_FILES['suitable_areas']}")
         
-        # 6. Find best locations (with 2km minimum separation for diversity)
+        # 6. Find best locations (10 total: top 5 with diversity + all ≥95 scores)
         best_locations = self.suitability_model.find_best_locations(
             self.transform,
             TARGET_CRS,
-            n_locations=5,
-            min_distance=2000.0  # 2km separation
+            n_locations=10,
+            min_distance=1000.0  # 1km separation for diverse locations
         )
         
         if len(best_locations) > 0:

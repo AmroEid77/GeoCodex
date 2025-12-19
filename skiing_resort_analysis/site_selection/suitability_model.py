@@ -270,14 +270,19 @@ class SuitabilityModel:
         print(f"\nFinding {n_locations} best locations...")
         print(f"  Minimum separation distance: {min_distance}m")
         
-        # Find local maxima using maximum filter (larger window for better peaks)
-        # Lower threshold to 60 to find more candidate locations
-        local_max = maximum_filter(np.nan_to_num(self.suitability_array, nan=0), size=50)
-        is_local_max = (self.suitability_array == local_max) & (self.suitability_array > 60)
+        # Find local maxima using maximum filter
+        # Use smaller window (10 pixels = 300m) to find sharp peaks
+        # Only consider HIGH suitability areas (≥80) for best locations
+        local_max = maximum_filter(np.nan_to_num(self.suitability_array, nan=0), size=10)
+        is_local_max = (self.suitability_array == local_max) & (self.suitability_array >= 80)
         
         # Get coordinates and values of local maxima
         rows, cols = np.where(is_local_max)
         values = self.suitability_array[rows, cols]
+        
+        print(f"  Found {len(values)} candidate peaks with suitability ≥80")
+        if len(values) > 0:
+            print(f"  Score range: {values.min():.2f} - {values.max():.2f}")
         
         # Convert to real-world coordinates
         coords = []
@@ -296,6 +301,7 @@ class SuitabilityModel:
         # Select diverse locations using greedy algorithm
         selected_indices = []
         selected_coords = []
+        skipped_count = 0
         
         for i in range(len(values)):
             if len(selected_indices) >= n_locations:
@@ -306,20 +312,30 @@ class SuitabilityModel:
                 # First location - always select the best
                 selected_indices.append(i)
                 selected_coords.append(coords[i])
+                print(f"  ✓ Rank 1: Score {values[i]:.2f} (best overall)")
             else:
                 # Check if far enough from all selected locations
                 distances = np.sqrt(np.sum((np.array(selected_coords) - coords[i])**2, axis=1))
+                min_dist = distances.min()
                 if np.all(distances >= min_distance):
                     selected_indices.append(i)
                     selected_coords.append(coords[i])
+                    print(f"  ✓ Rank {len(selected_indices)}: Score {values[i]:.2f} (min distance: {min_dist:.0f}m)")
+                else:
+                    skipped_count += 1
+                    if skipped_count <= 5:  # Show first 5 skipped
+                        print(f"  ✗ Skipped: Score {values[i]:.2f} (too close: {min_dist:.0f}m < {min_distance:.0f}m)")
+        
+        if skipped_count > 5:
+            print(f"  ... and {skipped_count - 5} more skipped due to proximity")
         
         # If we didn't find enough diverse locations, fill with best remaining
         if len(selected_indices) < n_locations:
-            print(f"  ⚠ Only found {len(selected_indices)} locations with {min_distance}m separation")
-            print(f"  Adding {n_locations - len(selected_indices)} more locations (closer together)")
+            print(f"\n  Filling remaining slots with best available locations...")
             for i in range(len(values)):
                 if i not in selected_indices:
                     selected_indices.append(i)
+                    print(f"  + Score {values[i]:.2f}")
                     if len(selected_indices) >= n_locations:
                         break
         

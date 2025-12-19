@@ -3,10 +3,15 @@
 "name": "best_locations",
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::26710" } },
 "features": [
-{ "type": "Feature", "properties": { "rank": 1, "suitability": 99.16700188016209, "row": 33, "col": 6 }, "geometry": { "type": "Point", "coordinates": [ 737927.6875, 4333727.5 ] } },
-{ "type": "Feature", "properties": { "rank": 2, "suitability": 99.16700188016209, "row": 264, "col": 79 }, "geometry": { "type": "Point", "coordinates": [ 740117.6875, 4326797.5 ] } },
-{ "type": "Feature", "properties": { "rank": 3, "suitability": 99.16700188016209, "row": 646, "col": 205 }, "geometry": { "type": "Point", "coordinates": [ 743897.6875, 4315337.5 ] } },
-{ "type": "Feature", "properties": { "rank": 4, "suitability": 99.16700188016209, "row": 703, "col": 30 }, "geometry": { "type": "Point", "coordinates": [ 738647.6875, 4313627.5 ] } },
-{ "type": "Feature", "properties": { "rank": 5, "suitability": 99.16700188016209, "row": 761, "col": 63 }, "geometry": { "type": "Point", "coordinates": [ 739637.6875, 4311887.5 ] } }
+{ "type": "Feature", "properties": { "rank": 1, "suitability": 98.61166980027015, "row": 264, "col": 79 }, "geometry": { "type": "Point", "coordinates": [ 740117.6875, 4326797.5 ] } },
+{ "type": "Feature", "properties": { "rank": 2, "suitability": 98.61166980027015, "row": 717, "col": 51 }, "geometry": { "type": "Point", "coordinates": [ 739277.6875, 4313207.5 ] } },
+{ "type": "Feature", "properties": { "rank": 3, "suitability": 98.383567661535267, "row": 718, "col": 124 }, "geometry": { "type": "Point", "coordinates": [ 741467.6875, 4313177.5 ] } },
+{ "type": "Feature", "properties": { "rank": 4, "suitability": 98.383567661535267, "row": 65, "col": 26 }, "geometry": { "type": "Point", "coordinates": [ 738527.6875, 4332767.5 ] } },
+{ "type": "Feature", "properties": { "rank": 5, "suitability": 98.083526471064076, "row": 505, "col": 323 }, "geometry": { "type": "Point", "coordinates": [ 747437.6875, 4319567.5 ] } },
+{ "type": "Feature", "properties": { "rank": 6, "suitability": 98.083526471064076, "row": 774, "col": 32 }, "geometry": { "type": "Point", "coordinates": [ 738707.6875, 4311497.5 ] } },
+{ "type": "Feature", "properties": { "rank": 7, "suitability": 97.985746388120418, "row": 434, "col": 237 }, "geometry": { "type": "Point", "coordinates": [ 744857.6875, 4321697.5 ] } },
+{ "type": "Feature", "properties": { "rank": 8, "suitability": 97.766832393881572, "row": 533, "col": 124 }, "geometry": { "type": "Point", "coordinates": [ 741467.6875, 4318727.5 ] } },
+{ "type": "Feature", "properties": { "rank": 9, "suitability": 97.680063223251622, "row": 571, "col": 129 }, "geometry": { "type": "Point", "coordinates": [ 741617.6875, 4317587.5 ] } },
+{ "type": "Feature", "properties": { "rank": 10, "suitability": 97.680063223251622, "row": 276, "col": 14 }, "geometry": { "type": "Point", "coordinates": [ 738167.6875, 4326437.5 ] } }
 ]
 }
