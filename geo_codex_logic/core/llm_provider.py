@@ -166,9 +166,30 @@ class BaseLLMClient(ABC):
             response = self.generate_response("Hello. Respond with one word: ready.")
             if response and "Error:" not in response:
                 return True, "Connection successful!"
+            
+            # Check for common error patterns and provide helpful messages
+            if "403" in response or "Forbidden" in response or "authorization" in response.lower():
+                return False, "Error: [403] Forbidden - Invalid API key or insufficient permissions. Please check your API key."
+            elif "401" in response or "Unauthorized" in response:
+                return False, "Error: [401] Unauthorized - Invalid API key. Please verify your API key."
+            elif "404" in response:
+                return False, "Error: [404] Not Found - Check your base URL and model name."
+            elif "429" in response:
+                return False, "Error: [429] Rate limit exceeded. Please try again later."
+            
             return False, response
         except Exception as e:
-            return False, f"Connection failed: {str(e)}"
+            error_msg = str(e)
+            # Extract meaningful error from exception
+            if "403" in error_msg or "Forbidden" in error_msg:
+                return False, "Error: [403] Forbidden - Invalid API key or insufficient permissions. Please check your API key."
+            elif "401" in error_msg or "Unauthorized" in error_msg:
+                return False, "Error: [401] Unauthorized - Invalid API key. Please verify your API key."
+            elif "404" in error_msg:
+                return False, "Error: [404] Not Found - Check your base URL and model name."
+            elif "429" in error_msg:
+                return False, "Error: [429] Rate limit exceeded. Please try again later."
+            return False, f"Connection failed: {error_msg}"
 
 
 class OpenAIClient(BaseLLMClient):
@@ -243,6 +264,14 @@ class AnthropicClient(BaseLLMClient):
             response = self.client.invoke(prompt)
             return response.content.strip() if response and response.content else "Error: Empty response"
         except Exception as e:
+            error_msg = str(e)
+            # Provide more specific error messages for common issues
+            if "403" in error_msg or "Forbidden" in error_msg:
+                return f"Error: [403] Forbidden - Authorization failed. Please verify your Anthropic API key is valid and has the required permissions."
+            elif "401" in error_msg:
+                return f"Error: [401] Unauthorized - Invalid Anthropic API key."
+            elif "429" in error_msg:
+                return f"Error: [429] Rate limit exceeded."
             return f"Error: {e}"
     
     def generate_vision_response(self, prompt: str, base64_image: str) -> str:
