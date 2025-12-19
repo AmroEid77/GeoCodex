@@ -50,6 +50,20 @@ class CommunityFactor(BaseFactor):
         self.log(f"Parameters: max_distance={max_distance}m, decay='{decay_type}'")
         self.log(f"Calculating distances from {len(grid)} cells to {len(source_data)} features...")
         
+        # Check if source data is empty
+        if len(source_data) == 0:
+            self.log("⚠ WARNING: No community features found!")
+            self.log("  All cells will receive score of 0")
+            return pd.Series(0, index=grid.index)
+        
+        # Check CRS match
+        if grid.crs != source_data.crs:
+            self.log(f"⚠ WARNING: CRS mismatch!")
+            self.log(f"  Grid CRS: {grid.crs}")
+            self.log(f"  Features CRS: {source_data.crs}")
+            self.log("  Transforming features to match grid...")
+            source_data = source_data.to_crs(grid.crs)
+        
         # Calculate grid cell centroids for point-based distance
         grid_centroids = grid.geometry.centroid
         

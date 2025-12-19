@@ -57,10 +57,19 @@ class MortalityFactor(BaseFactor):
             source_data,
             grid[['grid_id', 'geometry']],
             how='inner',
-            predicate='within'
+            predicate='intersects'  # Changed from 'within' to catch boundary trees
         )
         
         self.log(f"  → {len(joined)} trees matched to grid cells")
+        
+        # Check if any trees were matched
+        if len(joined) == 0:
+            self.log("⚠ WARNING: No trees matched to grid cells!")
+            self.log("  Possible issues:")
+            self.log("  1. CRS mismatch between grid and trees")
+            self.log("  2. Grid and trees don't overlap spatially")
+            self.log("  3. Wrong geometry type (expecting points)")
+            return pd.Series(0, index=grid.index)
         
         # Calculate scores based on method
         if method == 'average':
@@ -91,10 +100,12 @@ class MortalityFactor(BaseFactor):
         
         # Try common variations
         common_names = [
+            'Tot_mortal', 'TOT_MORTAL', 'tot_mortal',  # Fire Creek specific
             'MORTALITY', 'Mortality', 'mortality',
             'MORT_PCT', 'mort_pct', 'MortPct',
+            'MORT', 'Mort', 'mort',
             'PERCENT', 'Percent', 'percent',
-            'DEAD_PERCENT', 'DeadPercent'
+            'DEAD_PERCENT', 'DeadPercent', 'Dead_Percent'
         ]
         
         for name in common_names:

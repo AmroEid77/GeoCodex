@@ -115,14 +115,14 @@ class PopulationFactor(BaseFactor):
     
     def _detect_population_field(self, gdf: gpd.GeoDataFrame) -> str:
         """Auto-detect the population field name"""
-        # Try configured fields
-        for field in POPULATION_FIELDS.values():
-            if field in gdf.columns:
-                return field
+        # Try configured field first (POP from PopulatedAreast)
+        if 'population' in POPULATION_FIELDS and POPULATION_FIELDS['population'] in gdf.columns:
+            return POPULATION_FIELDS['population']
         
-        # Try common variations
+        # Try common variations (Fire Creek specific first)
         common_names = [
-            'POPULATION', 'Population', 'population', 'POP',
+            'POP', 'Pop', 'pop',                    # Fire Creek: PopulatedAreast.POP
+            'POPULATION', 'Population', 'population',
             'POP_TOTAL', 'TOTALPOP', 'TotalPop', 'pop_total',
             'PERSONS', 'Persons', 'persons'
         ]
