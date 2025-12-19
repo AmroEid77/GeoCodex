@@ -25,15 +25,15 @@ Whether you're a seasoned GIS analyst or a newcomer to spatial databases, GeoCod
 
 ### 🎯 Core Capabilities
 
-| Feature | Description |
-|---------|-------------|
-| **Natural Language to SQL** | Convert plain English questions into optimized PostGIS queries |
-| **Multi-Provider LLM Support** | Choose from OpenAI, Anthropic, Google Gemini, NVIDIA, OpenRouter, or Ollama |
-| **Dual-Agent Architecture** | Separate vision and coding models for optimal performance |
-| **Image Analysis** | Upload map sketches or diagrams for spatial query generation |
-| **Self-Healing SQL** | Automatic error detection and correction (up to 3 retry attempts) |
-| **Chat Interface** | Conversational interaction with context-aware responses |
-| **DE-9IM Support** | Advanced topological analysis using Dimensionally Extended 9-Intersection Model |
+| Feature                        | Description                                                                     |
+| ------------------------------ | ------------------------------------------------------------------------------- |
+| **Natural Language to SQL**    | Convert plain English questions into optimized PostGIS queries                  |
+| **Multi-Provider LLM Support** | Choose from OpenAI, Anthropic, Google Gemini, NVIDIA, OpenRouter, or Ollama     |
+| **Dual-Agent Architecture**    | Separate vision and coding models for optimal performance                       |
+| **Image Analysis**             | Upload map sketches or diagrams for spatial query generation                    |
+| **Self-Healing SQL**           | Automatic error detection and correction (up to 3 retry attempts)               |
+| **Chat Interface**             | Conversational interaction with context-aware responses                         |
+| **DE-9IM Support**             | Advanced topological analysis using Dimensionally Extended 9-Intersection Model |
 
 ### 🔬 Advanced Spatial Analysis
 
@@ -92,14 +92,14 @@ cp -r GeoCodex ~/Library/Application\ Support/QGIS/QGIS3/profiles/default/python
 
 GeoCodex supports multiple LLM providers, giving you flexibility in cost, performance, and privacy:
 
-| Provider | Vision Models | Code Models | Notes |
-|----------|--------------|-------------|-------|
-| **OpenAI** | GPT-4o, GPT-4o-mini, GPT-4-turbo | GPT-4o, GPT-4o-mini, GPT-3.5-turbo | Best overall quality |
-| **Anthropic** | Claude Sonnet 4, Claude 3.5 Sonnet, Claude 3 Opus | Claude Sonnet 4, Claude 3.5 Sonnet | Excellent reasoning |
-| **Google Gemini** | Gemini 2.0 Flash, Gemini 1.5 Pro | Gemini 2.0 Flash, Gemini 1.5 Pro | Fast & cost-effective |
-| **NVIDIA NIM** | Mistral Medium 3, Llama 3.2 Vision | DeepSeek V3.1, Llama 3.3, Qwen 2.5 Coder | Enterprise-grade |
-| **OpenRouter** | Multiple providers | Multiple providers | Unified API access |
-| **Ollama** | LLaVA, BakLLaVA, Moondream | CodeLlama, DeepSeek Coder, Qwen 2.5 Coder | Local/private deployment |
+| Provider          | Vision Models                                     | Code Models                               | Notes                    |
+| ----------------- | ------------------------------------------------- | ----------------------------------------- | ------------------------ |
+| **OpenAI**        | GPT-4o, GPT-4o-mini, GPT-4-turbo                  | GPT-4o, GPT-4o-mini, GPT-3.5-turbo        | Best overall quality     |
+| **Anthropic**     | Claude Sonnet 4, Claude 3.5 Sonnet, Claude 3 Opus | Claude Sonnet 4, Claude 3.5 Sonnet        | Excellent reasoning      |
+| **Google Gemini** | Gemini 2.0 Flash, Gemini 1.5 Pro                  | Gemini 2.0 Flash, Gemini 1.5 Pro          | Fast & cost-effective    |
+| **NVIDIA NIM**    | Mistral Medium 3, Llama 3.2 Vision                | DeepSeek V3.1, Llama 3.3, Qwen 2.5 Coder  | Enterprise-grade         |
+| **OpenRouter**    | Multiple providers                                | Multiple providers                        | Unified API access       |
+| **Ollama**        | LLaVA, BakLLaVA, Moondream                        | CodeLlama, DeepSeek Coder, Qwen 2.5 Coder | Local/private deployment |
 
 ### Getting API Keys
 
@@ -135,11 +135,13 @@ GeoCodex supports multiple LLM providers, giving you flexibility in cost, perfor
 ### 3. Start Asking Questions!
 
 **Tab 1: Ask Data** - Direct natural language queries
+
 ```
 "Show me all parks larger than 100 acres within 5 miles of schools"
 ```
 
 **Tab 2: GeoCodex Chat** - Conversational interface with image support
+
 ```
 "I need to find optimal locations for new fire stations based on population density"
 [Attach image of current station layout]
@@ -159,6 +161,7 @@ The simplest way to query your spatial database:
 4. Click **Execute SQL** to run and visualize results
 
 **Example Questions:**
+
 - "Find all buildings within flood zone A"
 - "Which roads intersect with wetland areas?"
 - "List hospitals more than 20km from any fire station"
@@ -173,6 +176,7 @@ For complex, multi-step analysis with image support:
 3. **Execute SQL**: When SQL appears in the response, click **Run SQL** to execute
 
 **The Dual-Agent Flow:**
+
 1. **Interpreter Agent** (vision model) analyzes your image and extracts requirements
 2. **Coder Agent** (SQL model) generates precise PostGIS queries based on the analysis
 
@@ -225,15 +229,15 @@ GeoCodex automatically attempts to fix SQL errors:
 
 ### Key Components
 
-| Component | Description |
-|-----------|-------------|
-| `geo_codex_dialog.py` | Main UI controller with async threading |
-| `orchestrator.py` | Workflow management, dual-agent coordination |
-| `llm_client.py` | Unified interface to all LLM providers |
-| `llm_provider.py` | Provider configurations and model catalogs |
-| `prompt_builder.py` | Expert prompts for SQL generation |
-| `db_connector.py` | PostgreSQL/PostGIS database operations |
-| `image_utils.py` | Image processing for vision models |
+| Component             | Description                                  |
+| --------------------- | -------------------------------------------- |
+| `geo_codex_dialog.py` | Main UI controller with async threading      |
+| `orchestrator.py`     | Workflow management, dual-agent coordination |
+| `llm_client.py`       | Unified interface to all LLM providers       |
+| `llm_provider.py`     | Provider configurations and model catalogs   |
+| `prompt_builder.py`   | Expert prompts for SQL generation            |
+| `db_connector.py`     | PostgreSQL/PostGIS database operations       |
+| `image_utils.py`      | Image processing for vision models           |
 
 ---
 
@@ -268,6 +272,7 @@ Password: ****
 ## 📚 Examples
 
 ### Basic Proximity Query
+
 ```
 User: "Find all hospitals within 5 miles of parks"
 
@@ -281,12 +286,13 @@ parks_proj AS (
 SELECT DISTINCT h.*, h.geom
 FROM hospitals_proj h
 WHERE EXISTS (
-  SELECT 1 FROM parks_proj p 
+  SELECT 1 FROM parks_proj p
   WHERE ST_DWithin(h.geom_proj, p.geom_proj, 8046.72)
 );
 ```
 
 ### Advanced DE-9IM Topology
+
 ```
 User: "Find parcels that share exactly a boundary edge with the flood zone (no interior overlap)"
 
@@ -297,12 +303,13 @@ WHERE ST_Relate(p.geom, f.geom, 'FF2F11212');
 ```
 
 ### Multi-Criteria Site Selection
+
 ```
 User: "Find vacant lots larger than 2 acres, within 1km of transit stations, and outside flood zones"
 
 Generated SQL:
 WITH vacant_lots AS (
-  SELECT * FROM parcels 
+  SELECT * FROM parcels
   WHERE land_use = 'vacant' AND ST_Area(geom) > 8093.71
 ),
 near_transit AS (
@@ -340,8 +347,8 @@ This project is licensed under the GPL v2 License - see the [LICENSE](LICENSE) f
 
 ## 👥 Authors
 
-- **Amro Eid** - *Initial work & Development* - [AmroEid77](https://github.com/AmroEid77)
-- **Ahmad** - *Contributor* - [Ahmad](https://github.com/AhmadHudhud83)
+- **Amro Eid** - _Initial work & Development_ - [AmroEid77](https://github.com/AmroEid77)
+- **Ahmad** - _Contributor_ - [AhmadHudhud83](https://github.com/AhmadHudhud83)
 
 ---
 
