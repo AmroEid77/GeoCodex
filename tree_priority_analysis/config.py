@@ -40,9 +40,10 @@ OUTPUT_HTML_MAP = os.path.join(OUTPUT_DIR, 'tree_priority_map.html')
 # COORDINATE REFERENCE SYSTEM
 # ═══════════════════════════════════════════════════════════════
 # Target CRS for distance calculations (meters)
-# Adjust based on your data's location
-# For US data, use appropriate State Plane or UTM zone
-TARGET_CRS = "EPSG:2163"  # US National Atlas Equal Area
+# EPSG:2163 used internally for accurate equal-area distance calculations
+# Results are transformed back to source CRS (EPSG:26711) for output
+ANALYSIS_CRS = "EPSG:2163"  # US National Atlas Equal Area (internal calculations)
+OUTPUT_CRS = "EPSG:26711"   # NAD27 / UTM Zone 11N (match input data)
 
 # ═══════════════════════════════════════════════════════════════
 # FACTOR WEIGHTS (must sum to 1.0)
@@ -71,48 +72,17 @@ DISTANCE_THRESHOLDS = {
 }
 
 # ═══════════════════════════════════════════════════════════════
-# FIELD NAME MAPPING (Fire Creek PostGIS Schema)
+# MORTALITY FIELD MAPPING
 # ═══════════════════════════════════════════════════════════════
-# Exact field names from PostGIS tables
+# Adjust these based on actual field names in your shapefile
 MORTALITY_FIELDS = {
-    'mortality_percent': 'Tot_mortal',  # SBNFMortalityt.Tot_mortal
-    'tree_count': 'OBJECTID',           # Optional: use OBJECTID as proxy
+    'mortality_percent': 'MORTALITY',  # Field containing mortality %
+    'tree_count': 'TREE_COUNT',        # Optional: number of trees
 }
 
 POPULATION_FIELDS = {
-    'population': 'POP',                # PopulatedAreast.POP
-    'density': 'pop_per_sq',            # PopulatedAreast.pop_per_sq (per sq mi)
-    'area': 'area_sqmi',                # PopulatedAreast.area_sqmi
-}
-
-GRID_FIELDS = {
-    'grid_id': 'GRID',                  # CuttingGrids.GRID
-    'area': 'SHAPE_Area',               # CuttingGrids.SHAPE_Area
-}
-
-COMMUNITY_FIELDS = {
-    'name': 'NAME',                     # Communityfeatures.NAME
-    'weight': 'weight',                 # Communityfeatures.weight (optional)
-}
-
-EGRESS_FIELDS = {
-    'weight': 'weight',                 # EgressRoutes.weight (optional)
-}
-
-UTILITY_FIELDS = {
-    'transmission': {
-        'circuit': 'CIRCUIT_NO',        # Transmission.CIRCUIT_NO
-        'name': 'NAME',                 # Transmission.NAME
-        'voltage': 'KV',                # Transmission.KV
-        'weight': 'weight',             # Transmission.weight
-    },
-    'subtransmission': {
-        'name': 'NAME',                 # SubTransmission.NAME
-        'priority': 'Priority',         # SubTransmission.Priority
-    },
-    'distribution': {
-        # DistCircuits has only OBJECTID and SHAPE_Leng
-    },
+    'population': 'POPULATION',        # Field containing population count
+    'density': 'POP_DENSITY',          # Optional: pre-calculated density
 }
 
 # ═══════════════════════════════════════════════════════════════

@@ -10,7 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from typing import Optional
-from .config import OUTPUT_SHAPEFILE, OUTPUT_CSV, OUTPUT_HTML_MAP, COLOR_MAP, OUTPUT_DIR
+from .config import OUTPUT_SHAPEFILE, OUTPUT_CSV, OUTPUT_HTML_MAP, COLOR_MAP, OUTPUT_DIR, OUTPUT_CRS
 
 
 class Visualizer:
@@ -47,7 +47,7 @@ class Visualizer:
         self.log(f"Exporting to shapefile: {output_path}")
         
         # Shapefile has column name length limit (10 chars)
-        # Rename columns to fit
+        # Rename columns to fit shapefile 10-char limit
         export_df = result.copy()
         column_mapping = {
             'mortality_score': 'mort_scr',
@@ -61,6 +61,11 @@ class Visualizer:
         }
         
         export_df = export_df.rename(columns=column_mapping)
+        
+        # Transform back to source CRS (EPSG:26711) for compatibility with input data
+        if export_df.crs != OUTPUT_CRS:
+            export_df = export_df.to_crs(OUTPUT_CRS)
+            self.log(f"  → Transformed to {OUTPUT_CRS} for output")
         
         # Export
         export_df.to_file(output_path)

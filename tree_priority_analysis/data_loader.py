@@ -8,7 +8,7 @@ import os
 import geopandas as gpd
 from typing import Dict, Optional
 from shapely.geometry import Point, LineString, Polygon
-from .config import SHAPEFILES, TARGET_CRS, OPTIONS
+from .config import SHAPEFILES, ANALYSIS_CRS, OPTIONS
 
 
 class DataLoader:
@@ -87,9 +87,9 @@ class DataLoader:
             
             # Transform to target CRS
             original_crs = gdf.crs
-            if gdf.crs != TARGET_CRS:
-                self.log(f"  → Transforming from {original_crs} to {TARGET_CRS}")
-                gdf = gdf.to_crs(TARGET_CRS)
+            if gdf.crs != ANALYSIS_CRS:
+                self.log(f"  → Transforming from {original_crs} to {ANALYSIS_CRS}")
+                gdf = gdf.to_crs(ANALYSIS_CRS)
             
             self.log(f"  ✓ Loaded {len(gdf)} features | Geometry: {gdf.geometry.geom_type.iloc[0] if len(gdf) > 0 else 'N/A'}")
             
@@ -122,7 +122,7 @@ class DataLoader:
         
         combined = gpd.GeoDataFrame(
             pd.concat(utility_layers, ignore_index=True),
-            crs=TARGET_CRS
+            crs=ANALYSIS_CRS
         )
         
         self.log(f"  ✓ Combined {len(combined)} utility features from {len(utility_layers)} layers")
