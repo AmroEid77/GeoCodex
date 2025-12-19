@@ -83,6 +83,7 @@ INTERPOLATION_PARAMS = {
 # ═══════════════════════════════════════════════════════════════
 
 # Slope criteria (in degrees)
+# Stricter criteria for quality ski resort terrain
 SLOPE_CRITERIA = {
     'min_slope': 15,        # Minimum slope for skiing
     'optimal_min': 20,      # Optimal range start
@@ -105,12 +106,19 @@ HILLSHADE_CRITERIA = {
     'optimal_shade': 150,   # Optimal shading
 }
 
+# Snow depth constraint (hard threshold in cm)
+# Based on actual data range: 0-28 cm
+SNOW_DEPTH_CONSTRAINT = {
+    'min_snow': 10.0,       # Minimum snow depth required (cm) - realistic threshold
+    'optimal_snow': 20.0,   # Optimal snow depth (cm)
+}
+
 # Weights for suitability calculation (must sum to 1.0)
+# Note: Snow depth is now a HARD CONSTRAINT, not a weighted factor
 SUITABILITY_WEIGHTS = {
-    'slope': 0.40,          # 40% - Most important
-    'aspect': 0.35,         # 35% - Very important (sun exposure)
-    'hillshade': 0.15,      # 15% - Shading/terrain
-    'snow_depth': 0.10,     # 10% - Snow availability
+    'slope': 0.50,          # 50% - Most important terrain factor
+    'aspect': 0.35,         # 35% - Sun exposure (north-facing preferred)
+    'hillshade': 0.15,      # 15% - Terrain shading
 }
 
 assert abs(sum(SUITABILITY_WEIGHTS.values()) - 1.0) < 0.001, "Weights must sum to 1.0"

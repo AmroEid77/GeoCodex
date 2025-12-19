@@ -34,22 +34,64 @@ class SuitabilityModel:
         self.weights = weights
         self.suitability_array = None
     
+    def calculate_snow_suitability(self, snow_depth: np.ndarray) -> np.ndarray:
+        """
+        Calculate snow depth suitability scores
+        
+        Snow depth criteria:
+        - 0-5 cm: Poor (score 0-30) - insufficient snow
+        - 5-10 cm: Marginal (score 30-60) - minimal coverage
+        - 10-20 cm: Good (score 60-90) - adequate snow
+        - 20+ cm: Optimal (score 90-100) - excellent coverage
+        
+        Args:
+            snow_depth: Snow depth array (cm)
+            
+        Returns:
+            Snow suitability scores (0-100)
+        """
+        suitability = np.zeros_like(snow_depth, dtype=np.float32)
+        
+        # Poor: 0-5 cm (score 0-30)
+        mask = (snow_depth >= 0) & (snow_depth < 5)
+        suitability[mask] = snow_depth[mask] / 5.0 * 30.0
+        
+        # Marginal: 5-10 cm (score 30-60)
+        mask = (snow_depth >= 5) & (snow_depth < 10)
+        suitability[mask] = 30.0 + (snow_depth[mask] - 5.0) / 5.0 * 30.0
+        
+        # Good: 10-20 cm (score 60-90)
+        mask = (snow_depth >= 10) & (snow_depth < 20)
+        suitability[mask] = 60.0 + (snow_depth[mask] - 10.0) / 10.0 * 30.0
+        
+        # Optimal: 20+ cm (score 90-100)
+        mask = snow_depth >= 20
+        suitability[mask] = 90.0 + np.minimum((snow_depth[mask] - 20.0) / 10.0, 1.0) * 10.0
+        
+        # Preserve NaN
+        suitability[np.isnan(snow_depth)] = np.nan
+        
+        return suitability
+    
     def calculate_suitability(self, 
                              slope_suitability: np.ndarray,
                              aspect_suitability: np.ndarray,
                              hillshade_suitability: np.ndarray,
-                             snow_suitability: np.ndarray = None) -> np.ndarray:
+                             snow_depth: np.ndarray = None,
+                             min_snow_threshold: float = 10.0) -> np.ndarray:
         """
         Calculate overall suitability using weighted overlay
+        Snow depth is applied as a HARD CONSTRAINT before weighted overlay
         
         Args:
             slope_suitability: Slope suitability scores (0-100)
             aspect_suitability: Aspect suitability scores (0-100)
             hillshade_suitability: Hillshade suitability scores (0-100)
-            snow_suitability: Snow depth suitability scores (0-100, optional)
+            snow_depth: Snow depth array (cm) - used as hard constraint
+            min_snow_threshold: Minimum snow depth required (cm)
             
         Returns:
-            Overall suitability scores (0-100)
+            Overall suitability scores (0-100), with areas below snow threshold = 0
         """
         print("\n" + "="*60)
         print("SUITABILITY MODEL - WEIGHTED OVERLAY")
@@ -59,23 +101,33 @@ class SuitabilityModel:
         print(f"  Slope: {self.weights['slope']*100:.1f}%")
         print(f"  Aspect: {self.weights['aspect']*100:.1f}%")
         print(f"  Hillshade: {self.weights['hillshade']*100:.1f}%")
-        if snow_suitability is not None:
-            print(f"  Snow depth: {self.weights['snow_depth']*100:.1f}%")
+        if snow_depth is not None:
+            print(f"\nSnow Depth Constraint:")
+            print(f"  Minimum required: {min_snow_threshold:.1f} cm (HARD CONSTRAINT)")
+            print(f"  Areas below threshold will be excluded (suitability = 0)")
         
         # Initialize suitability
         suitability = np.zeros_like(slope_suitability)
         
-        # Weighted overlay
-        suitability += slope_suitability * self.weights['slope']
-        suitability += aspect_suitability * self.weights['aspect']
-        suitability += hillshade_suitability * self.weights['hillshade']
-        
-        if snow_suitability is not None:
-            suitability += snow_suitability * self.weights['snow_depth']
+        # STEP 1: Apply snow depth as HARD CONSTRAINT
+        # Areas with insufficient snow get suitability = 0, regardless of terrain
+        if snow_depth is not None:
+            sufficient_snow_mask = snow_depth >= min_snow_threshold
+            excluded_cells = np.sum(~sufficient_snow_mask & ~np.isnan(snow_depth))
+            if excluded_cells > 0:
+                print(f"  Excluded {excluded_cells} cells due to insufficient snow (<{min_snow_threshold:.1f} cm)")
         else:
-            # Redistribute snow weight to other factors
-            remaining_weight = 1.0 - self.weights['snow_depth']
-            suitability = suitability / remaining_weight
+            # No snow data - all areas pass constraint
+            sufficient_snow_mask = np.ones_like(slope_suitability, dtype=bool)
+        
+        # STEP 2: Weighted overlay (only for areas with sufficient snow)
+        suitability[sufficient_snow_mask] = (
+            slope_suitability[sufficient_snow_mask] * self.weights['slope'] +
+            aspect_suitability[sufficient_snow_mask] * self.weights['aspect'] +
+            hillshade_suitability[sufficient_snow_mask] * self.weights['hillshade']
+        )
+        
+        # Areas without sufficient snow remain 0
         
         # Preserve NaN values
         mask_nan = (np.isnan(slope_suitability) | 
@@ -133,6 +185,16 @@ class SuitabilityModel:
         
         print(f"  Found {num_features} suitable regions")
         
+        # Handle case where no suitable regions found
+        if num_features == 0:
+            print("  ⚠ Warning: No suitable regions found with current criteria")
+            # Return empty GeoDataFrame with proper structure
+            return gpd.GeoDataFrame(
+                columns=['region_id', 'area_cells', 'mean_suitability', 'max_suitability'],
+                geometry=[],
+                crs=crs
+            )
+        
         # Extract polygons for each region
         features = []
         for region_id in range(1, num_features + 1):
@@ -188,14 +250,16 @@ class SuitabilityModel:
     def find_best_locations(self, 
                            transform: Affine,
                            crs: str,
-                           n_locations: int = 5) -> gpd.GeoDataFrame:
+                           n_locations: int = 5,
+                           min_distance: float = 1000.0) -> gpd.GeoDataFrame:
         """
-        Find N best point locations for ski resort
+        Find N best point locations for ski resort with spatial diversity
         
         Args:
             transform: Raster transform
             crs: Coordinate reference system
             n_locations: Number of best locations to find
+            min_distance: Minimum distance between locations (meters)
             
         Returns:
             GeoDataFrame with best location points
@@ -204,41 +268,76 @@ class SuitabilityModel:
             raise ValueError("Suitability not calculated")
         
         print(f"\nFinding {n_locations} best locations...")
+        print(f"  Minimum separation distance: {min_distance}m")
         
-        # Find local maxima using maximum filter
-        local_max = maximum_filter(np.nan_to_num(self.suitability_array, nan=0), size=20)
-        is_local_max = (self.suitability_array == local_max) & (self.suitability_array > 0)
+        # Find local maxima using maximum filter (larger window for better peaks)
+        # Lower threshold to 60 to find more candidate locations
+        local_max = maximum_filter(np.nan_to_num(self.suitability_array, nan=0), size=50)
+        is_local_max = (self.suitability_array == local_max) & (self.suitability_array > 60)
         
         # Get coordinates and values of local maxima
         rows, cols = np.where(is_local_max)
         values = self.suitability_array[rows, cols]
+        
+        # Convert to real-world coordinates
+        coords = []
+        for row, col in zip(rows, cols):
+            x, y = transform * (col + 0.5, row + 0.5)
+            coords.append((x, y))
+        coords = np.array(coords)
         
         # Sort by suitability (descending)
         sort_idx = np.argsort(values)[::-1]
         rows = rows[sort_idx]
         cols = cols[sort_idx]
         values = values[sort_idx]
+        coords = coords[sort_idx]
         
-        # Take top N
-        n = min(n_locations, len(rows))
+        # Select diverse locations using greedy algorithm
+        selected_indices = []
+        selected_coords = []
         
-        features = []
-        for i in range(n):
-            # Convert to coordinates
-            x, y = transform * (cols[i] + 0.5, rows[i] + 0.5)
+        for i in range(len(values)):
+            if len(selected_indices) >= n_locations:
+                break
             
+            # Check distance to already selected locations
+            if len(selected_coords) == 0:
+                # First location - always select the best
+                selected_indices.append(i)
+                selected_coords.append(coords[i])
+            else:
+                # Check if far enough from all selected locations
+                distances = np.sqrt(np.sum((np.array(selected_coords) - coords[i])**2, axis=1))
+                if np.all(distances >= min_distance):
+                    selected_indices.append(i)
+                    selected_coords.append(coords[i])
+        
+        # If we didn't find enough diverse locations, fill with best remaining
+        if len(selected_indices) < n_locations:
+            print(f"  ⚠ Only found {len(selected_indices)} locations with {min_distance}m separation")
+            print(f"  Adding {n_locations - len(selected_indices)} more locations (closer together)")
+            for i in range(len(values)):
+                if i not in selected_indices:
+                    selected_indices.append(i)
+                    if len(selected_indices) >= n_locations:
+                        break
+        
+        # Create features
+        features = []
+        for rank, i in enumerate(selected_indices, 1):
             features.append({
-                'geometry': Point(x, y),
-                'rank': i + 1,
+                'geometry': Point(coords[i][0], coords[i][1]),
+                'rank': rank,
                 'suitability': values[i],
-                'row': rows[i],
-                'col': cols[i],
+                'row': int(rows[i]),
+                'col': int(cols[i]),
             })
         
         # Create GeoDataFrame
         gdf = gpd.GeoDataFrame(features, crs=crs)
         
-        print(f"  Top {n} locations identified:")
+        print(f"  Top {len(selected_indices)} locations identified:")
         for idx, row in gdf.iterrows():
             print(f"    Rank {row['rank']}: Suitability = {row['suitability']:.2f}")
         

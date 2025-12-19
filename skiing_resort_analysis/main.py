@@ -9,6 +9,17 @@ This module coordinates two main tasks:
 import os
 import sys
 
+# Fix Windows console encoding for Unicode characters and disable buffering
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+else:
+    # For Unix-like systems, also disable buffering
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', line_buffering=True)
+
 # Fix PROJ database conflict: Use conda environment's PROJ instead of PostgreSQL's
 try:
     import pyproj
@@ -27,7 +38,8 @@ from rasterio.transform import from_bounds
 from .config import (
     INPUT_FILES, OUTPUT_FILES, OUTPUT_DIR,
     SNOW_DEPTH_FIELD, TARGET_CRS, OPTIONS,
-    COLORMAP_SNOW, COLORMAP_SLOPE, COLORMAP_ASPECT, COLORMAP_SUITABILITY
+    COLORMAP_SNOW, COLORMAP_SLOPE, COLORMAP_ASPECT, COLORMAP_SUITABILITY,
+    SNOW_DEPTH_CONSTRAINT
 )
 from .data_loader import DataLoader
 from .interpolation import IDWInterpolator, KrigingInterpolator, SplineInterpolator
@@ -242,13 +254,91 @@ class SkiingResortAnalysis:
                 TARGET_CRS
             )
         
-        # 4. Overall suitability (weighted overlay)
+        # 4. Snow depth constraint (HARD THRESHOLD)
+        print(f"\n{'='*60}")
+        print("SNOW DEPTH CONSTRAINT (Hard Threshold)")
+        print(f"{'='*60}")
+        
+        # Use Kriging interpolation (best R² = 0.770)
+        snow_grid = self.snow_interpolated.get('Kriging')
+        if snow_grid is None:
+            print("⚠ Warning: Kriging interpolation not found, using IDW")
+            snow_grid = self.snow_interpolated.get('IDW')
+        
+        if snow_grid is not None:
+            # Resample snow grid to match DEM dimensions if needed
+            if snow_grid.shape != slope_suitability.shape:
+                print(f"  Resampling snow grid from {snow_grid.shape} to {slope_suitability.shape}...")
+                from scipy.ndimage import zoom
+                zoom_factors = (
+                    slope_suitability.shape[0] / snow_grid.shape[0],
+                    slope_suitability.shape[1] / snow_grid.shape[1]
+                )
+                snow_grid = zoom(snow_grid, zoom_factors, order=1)  # Bilinear interpolation
+            
+            min_snow = SNOW_DEPTH_CONSTRAINT['min_snow']
+            print(f"  Snow depth range: {np.nanmin(snow_grid):.2f} - {np.nanmax(snow_grid):.2f} cm")
+            print(f"  Minimum required: {min_snow:.1f} cm")
+            
+            cells_below_threshold = np.sum((snow_grid < min_snow) & ~np.isnan(snow_grid))
+            total_cells = np.sum(~np.isnan(snow_grid))
+            print(f"  Cells excluded: {cells_below_threshold}/{total_cells} ({cells_below_threshold/total_cells*100:.1f}%)")
+        else:
+            print("  ⚠ Warning: No snow interpolation available")
+            print("  Proceeding without snow constraint (all areas allowed)")
+        
+        # 5. Overall suitability (weighted overlay with snow as hard constraint)
         overall_suitability = self.suitability_model.calculate_suitability(
             slope_suitability,
             aspect_suitability,
             hillshade_suitability,
-            snow_suitability=None  # Can add snow depth suitability here if needed
+            snow_depth=snow_grid,
+            min_snow_threshold=SNOW_DEPTH_CONSTRAINT['min_snow']
         )
+        
+        # Diagnostic: Show what limits suitability
+        print(f"\n{'='*60}")
+        print("SUITABILITY LIMITING FACTORS ANALYSIS")
+        print(f"{'='*60}")
+        
+        # Find cells with good terrain but excluded by snow constraint
+        if snow_grid is not None:
+            good_terrain = (slope_suitability > 70) & (aspect_suitability > 70)
+            insufficient_snow = snow_grid < SNOW_DEPTH_CONSTRAINT['min_snow']
+            excluded_by_snow = good_terrain & insufficient_snow
+            
+            if np.any(excluded_by_snow):
+                n_cells = np.sum(excluded_by_snow)
+                print(f"\n  Areas with good terrain but excluded by snow constraint: {n_cells} cells")
+                print(f"    Average snow depth: {snow_grid[excluded_by_snow].mean():.1f} cm")
+                print(f"    Required minimum: {SNOW_DEPTH_CONSTRAINT['min_snow']:.1f} cm")
+                print(f"    → These areas have proper slope/aspect but insufficient snow coverage")
+            
+            # Find cells with sufficient snow but poor terrain
+            sufficient_snow = snow_grid >= SNOW_DEPTH_CONSTRAINT['min_snow']
+            poor_overall = overall_suitability < 50
+            good_snow_poor_terrain = sufficient_snow & poor_overall & (overall_suitability > 0)
+            
+            if np.any(good_snow_poor_terrain):
+                n_cells = np.sum(good_snow_poor_terrain)
+                print(f"\n  Areas with sufficient snow (≥{SNOW_DEPTH_CONSTRAINT['min_snow']:.1f} cm) but poor terrain suitability: {n_cells} cells")
+                
+                # What's limiting them?
+                poor_slope = slope_suitability[good_snow_poor_terrain].mean()
+                poor_aspect = aspect_suitability[good_snow_poor_terrain].mean()
+                poor_shade = hillshade_suitability[good_snow_poor_terrain].mean()
+                
+                print(f"    Average terrain scores:")
+                print(f"      Slope: {poor_slope:.1f} (should be >70)")
+                print(f"      Aspect: {poor_aspect:.1f} (should be >70)")
+                print(f"      Hillshade: {poor_shade:.1f} (should be >70)")
+                
+                # Identify main limiting factor
+                scores = {'Slope': poor_slope, 'Aspect': poor_aspect, 'Hillshade': poor_shade}
+                limiting_factor = min(scores, key=scores.get)
+                print(f"    → Main limiting factor: {limiting_factor} ({scores[limiting_factor]:.1f})")
+        
+        print(f"{'='*60}\n")
         
         # Save suitability raster
         self.suitability_model.save_suitability(
@@ -267,11 +357,12 @@ class SkiingResortAnalysis:
             suitable_areas.to_file(OUTPUT_FILES['suitable_areas'])
             print(f"✓ Suitable areas saved to: {OUTPUT_FILES['suitable_areas']}")
         
-        # 6. Find best locations
+        # 6. Find best locations (with 2km minimum separation for diversity)
         best_locations = self.suitability_model.find_best_locations(
             self.transform,
             TARGET_CRS,
-            n_locations=5
+            n_locations=5,
+            min_distance=2000.0  # 2km separation
         )
         
         if len(best_locations) > 0:
