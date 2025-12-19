@@ -357,7 +357,8 @@ class GeoCodexDialog(QDialog, FORM_CLASS):
         self._set_ui_busy(True, "Executing SQL (with auto-fix enabled)...")
         self.executeSqlBtn.setEnabled(False)  # Extra disable for execute button
         
-        layer_name = self.userQueryInput.toPlainText()[:30] or "AI Generated Layer"
+        # Get user query for smart layer naming (optional)
+        user_query = self.userQueryInput.toPlainText()
         
         # Store configs for worker
         interpreter_config = self._get_interpreter_config()
@@ -372,8 +373,9 @@ class GeoCodexDialog(QDialog, FORM_CLASS):
                 db_params=db_params
             )
             # Use the new auto-fix method with max 3 retries
+            # Smart layer naming will be used (no layer_name parameter)
             success, message, final_sql = orchestrator.run_sql_with_auto_fix(
-                sql_query, layer_name, max_retries=3
+                sql_query, max_retries=3, user_query=user_query
             )
             # Return as tuple with the final SQL
             return success, f"{message}|||{final_sql}"
@@ -693,7 +695,12 @@ class GeoCodexDialog(QDialog, FORM_CLASS):
         })
         self._update_chat_display()
         
-        layer_name = "GeoCodex Query Result"
+        # Get user's last question from chat history for smart layer naming
+        user_query = None
+        for message in reversed(self.chat_history):
+            if message.get("role") == "user":
+                user_query = message.get("content", "")
+                break
         
         # Store configs for worker
         interpreter_config = self._get_interpreter_config()
@@ -709,8 +716,9 @@ class GeoCodexDialog(QDialog, FORM_CLASS):
                 db_params=db_params
             )
             # Use the new auto-fix method with max 3 retries
+            # Smart layer naming will be used (no layer_name parameter)
             success, message, final_sql = orchestrator.run_sql_with_auto_fix(
-                sql_query, layer_name, max_retries=3
+                sql_query, max_retries=3, user_query=user_query
             )
             # Return as tuple with the final SQL
             return success, f"{message}|||{final_sql}"
