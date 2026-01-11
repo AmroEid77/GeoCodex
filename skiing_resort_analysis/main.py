@@ -39,7 +39,7 @@ from .config import (
     INPUT_FILES, OUTPUT_FILES, OUTPUT_DIR,
     SNOW_DEPTH_FIELD, TARGET_CRS, OPTIONS,
     COLORMAP_SNOW, COLORMAP_SLOPE, COLORMAP_ASPECT, COLORMAP_SUITABILITY,
-    SNOW_DEPTH_CONSTRAINT
+    SNOW_DEPTH_CONSTRAINT, SUITABILITY_WEIGHTS
 )
 from .data_loader import DataLoader
 from .interpolation import IDWInterpolator, KrigingInterpolator, SplineInterpolator
@@ -50,6 +50,10 @@ from .utils.qml_generator import (
     create_aspect_qml, create_suitability_qml
 )
 from .utils.map_generator import create_interactive_map
+from .utils.location_visualizer import (
+    create_location_suitability_plot,
+    create_location_detail_plots
+)
 
 
 class SkiingResortAnalysis:
@@ -254,9 +258,9 @@ class SkiingResortAnalysis:
                 TARGET_CRS
             )
         
-        # 4. Snow depth constraint (HARD THRESHOLD)
+        # 4. Snow depth factor (SOFT WEIGHTED)
         print(f"\n{'='*60}")
-        print("SNOW DEPTH CONSTRAINT (Hard Threshold)")
+        print("SNOW DEPTH FACTOR (Soft Weighted Constraint)")
         print(f"{'='*60}")
         
         # Use Kriging interpolation (best R² = 0.770)
@@ -278,16 +282,19 @@ class SkiingResortAnalysis:
             
             min_snow = SNOW_DEPTH_CONSTRAINT['min_snow']
             print(f"  Snow depth range: {np.nanmin(snow_grid):.2f} - {np.nanmax(snow_grid):.2f} cm")
-            print(f"  Minimum required: {min_snow:.1f} cm")
+            print(f"  Minimal exclusion threshold: {min_snow:.1f} cm")
+            print(f"  Snow treated as soft factor (weight: {SUITABILITY_WEIGHTS.get('snow', 0)*100:.0f}%)")
+            print(f"  This approach reduces temporal bias from snapshot data")
             
             cells_below_threshold = np.sum((snow_grid < min_snow) & ~np.isnan(snow_grid))
             total_cells = np.sum(~np.isnan(snow_grid))
-            print(f"  Cells excluded: {cells_below_threshold}/{total_cells} ({cells_below_threshold/total_cells*100:.1f}%)")
+            if cells_below_threshold > 0:
+                print(f"  Cells with minimal exclusion: {cells_below_threshold}/{total_cells} ({cells_below_threshold/total_cells*100:.1f}%)")
         else:
             print("  ⚠ Warning: No snow interpolation available")
-            print("  Proceeding without snow constraint (all areas allowed)")
+            print("  Proceeding without snow factor")
         
-        # 5. Overall suitability (weighted overlay with snow as hard constraint)
+        # 5. Overall suitability (weighted overlay with snow as soft factor)
         overall_suitability = self.suitability_model.calculate_suitability(
             slope_suitability,
             aspect_suitability,
@@ -296,49 +303,19 @@ class SkiingResortAnalysis:
             min_snow_threshold=SNOW_DEPTH_CONSTRAINT['min_snow']
         )
         
-        # Diagnostic: Show what limits suitability
+        # Diagnostic: Show factor contributions
         print(f"\n{'='*60}")
-        print("SUITABILITY LIMITING FACTORS ANALYSIS")
+        print("MODEL CONFIGURATION SUMMARY")
         print(f"{'='*60}")
-        
-        # Find cells with good terrain but excluded by snow constraint
-        if snow_grid is not None:
-            good_terrain = (slope_suitability > 70) & (aspect_suitability > 70)
-            insufficient_snow = snow_grid < SNOW_DEPTH_CONSTRAINT['min_snow']
-            excluded_by_snow = good_terrain & insufficient_snow
-            
-            if np.any(excluded_by_snow):
-                n_cells = np.sum(excluded_by_snow)
-                print(f"\n  Areas with good terrain but excluded by snow constraint: {n_cells} cells")
-                print(f"    Average snow depth: {snow_grid[excluded_by_snow].mean():.1f} cm")
-                print(f"    Required minimum: {SNOW_DEPTH_CONSTRAINT['min_snow']:.1f} cm")
-                print(f"    → These areas have proper slope/aspect but insufficient snow coverage")
-            
-            # Find cells with sufficient snow but poor terrain
-            sufficient_snow = snow_grid >= SNOW_DEPTH_CONSTRAINT['min_snow']
-            poor_overall = overall_suitability < 50
-            good_snow_poor_terrain = sufficient_snow & poor_overall & (overall_suitability > 0)
-            
-            if np.any(good_snow_poor_terrain):
-                n_cells = np.sum(good_snow_poor_terrain)
-                print(f"\n  Areas with sufficient snow (≥{SNOW_DEPTH_CONSTRAINT['min_snow']:.1f} cm) but poor terrain suitability: {n_cells} cells")
-                
-                # What's limiting them?
-                poor_slope = slope_suitability[good_snow_poor_terrain].mean()
-                poor_aspect = aspect_suitability[good_snow_poor_terrain].mean()
-                poor_shade = hillshade_suitability[good_snow_poor_terrain].mean()
-                
-                print(f"    Average terrain scores:")
-                print(f"      Slope: {poor_slope:.1f} (should be >70)")
-                print(f"      Aspect: {poor_aspect:.1f} (should be >70)")
-                print(f"      Hillshade: {poor_shade:.1f} (should be >70)")
-                
-                # Identify main limiting factor
-                scores = {'Slope': poor_slope, 'Aspect': poor_aspect, 'Hillshade': poor_shade}
-                limiting_factor = min(scores, key=scores.get)
-                print(f"    → Main limiting factor: {limiting_factor} ({scores[limiting_factor]:.1f})")
-        
-        print(f"{'='*60}\n")
+        print(f"\nWeight Distribution:")
+        print(f"  • Slope: {SUITABILITY_WEIGHTS['slope']*100:.0f}% (reduced from 60% to avoid steep terrain bias)")
+        print(f"  • Aspect: {SUITABILITY_WEIGHTS['aspect']*100:.0f}% (north-facing preference)")
+        print(f"  • Hillshade: {SUITABILITY_WEIGHTS['hillshade']*100:.0f}% (terrain shading)")
+        print(f"  • Snow: {SUITABILITY_WEIGHTS.get('snow', 0)*100:.0f}% (soft factor - temporal awareness)")
+        print(f"\nRationale:")
+        print(f"  ✓ Reduced slope dominance prevents over-selection of extreme terrain")
+        print(f"  ✓ Snow as soft factor reduces bias from temporal variability")
+        print(f"  ✓ Better alignment with real-world resort locations (e.g. Lake Tahoe region)")
         
         # Save suitability raster
         self.suitability_model.save_suitability(
@@ -347,7 +324,7 @@ class SkiingResortAnalysis:
             TARGET_CRS
         )
         
-        # 5. Extract suitable areas
+        # 6. Extract suitable areas
         suitable_areas = self.suitability_model.extract_suitable_areas(
             self.transform,
             TARGET_CRS
@@ -357,7 +334,7 @@ class SkiingResortAnalysis:
             suitable_areas.to_file(OUTPUT_FILES['suitable_areas'])
             print(f"✓ Suitable areas saved to: {OUTPUT_FILES['suitable_areas']}")
         
-        # 6. Find best locations (10 total: top 5 with diversity + all ≥95 scores)
+        # 7. Find best locations (10 total: top with diversity)
         best_locations = self.suitability_model.find_best_locations(
             self.transform,
             TARGET_CRS,
@@ -369,11 +346,17 @@ class SkiingResortAnalysis:
             best_locations.to_file(OUTPUT_FILES['best_locations'], driver='GeoJSON')
             print(f"✓ Best locations saved to: {OUTPUT_FILES['best_locations']}")
         
-        # 7. Create visualization
+        # 8. Create visualization
         if OPTIONS['create_visualizations']:
             self._visualize_suitability_analysis(
                 slope, aspect, hillshade, overall_suitability
             )
+            # Create top locations visualization
+            if len(best_locations) > 0:
+                self._visualize_top_locations(
+                    overall_suitability, best_locations, suitable_areas,
+                    slope, aspect, hillshade, snow_grid
+                )
         
         print(f"\n✓ Task 2 complete: Suitability analysis")
     
@@ -498,6 +481,47 @@ class SkiingResortAnalysis:
         plt.close()
         
         print(f"✓ Visualization saved to: {OUTPUT_FILES['suitability_map_png']}")
+    
+    def _visualize_top_locations(self, suitability_array, best_locations_gdf, 
+                                 suitable_areas_gdf, slope_array, aspect_array, 
+                                 hillshade_array, snow_array):
+        """
+        Create visualizations of top locations and suitability
+        
+        Args:
+            suitability_array: Overall suitability scores
+            best_locations_gdf: GeoDataFrame with best locations
+            suitable_areas_gdf: GeoDataFrame with suitable areas
+            slope_array: Slope data
+            aspect_array: Aspect data
+            hillshade_array: Hillshade data
+            snow_array: Snow depth data
+        """
+        print("\nCreating top locations visualizations...")
+        
+        # Main visualization: Top locations on suitability map
+        create_location_suitability_plot(
+            suitability_array=suitability_array,
+            best_locations_gdf=best_locations_gdf,
+            suitable_areas_gdf=suitable_areas_gdf,
+            transform=self.transform,
+            output_path=OUTPUT_FILES['top_locations_viz']
+        )
+        
+        # Detailed zoom plots for top locations
+        create_location_detail_plots(
+            suitability_array=suitability_array,
+            best_locations_gdf=best_locations_gdf,
+            transform=self.transform,
+            slope_array=slope_array,
+            aspect_array=aspect_array,
+            hillshade_array=hillshade_array,
+            snow_array=snow_array,
+            output_path=OUTPUT_FILES['location_details_viz'],
+            zoom_size=50  # 50 pixels = 1.5km at 30m resolution
+        )
+        
+        print("✓ Top locations visualizations complete")
     
     def _generate_qml_styles(self):
         """Generate QML style files for QGIS layers"""
