@@ -45,6 +45,8 @@ OUTPUT_FILES = {
     # Visualizations
     'interpolation_comparison': os.path.join(OUTPUT_DIR, 'interpolation_comparison.png'),
     'suitability_map_png': os.path.join(OUTPUT_DIR, 'suitability_map.png'),
+    'top_locations_viz': os.path.join(OUTPUT_DIR, 'top_locations_analysis.png'),
+    'location_details_viz': os.path.join(OUTPUT_DIR, 'location_details.png'),
     'interactive_map': os.path.join(OUTPUT_DIR, 'skiing_resort_analysis.html'),
     
     # QML Style Files for QGIS
@@ -106,19 +108,23 @@ HILLSHADE_CRITERIA = {
     'optimal_shade': 150,   # Optimal shading
 }
 
-# Snow depth constraint (hard threshold in cm)
+# Snow depth criteria (soft constraint in cm)
 # Based on actual data range: 0-28 cm
+# Note: Snow is now a SOFT weighted factor, not a hard exclusion
 SNOW_DEPTH_CONSTRAINT = {
-    'min_snow': 15.0,       # Minimum snow depth required (cm) - realistic threshold
+    'min_snow': 5.0,        # Minimal exclusion threshold (cm) - very low to avoid temporal bias
     'optimal_snow': 20.0,   # Optimal snow depth (cm)
+    'poor_snow': 10.0,      # Poor snow threshold (cm)
 }
 
 # Weights for suitability calculation (must sum to 1.0)
-# Note: Snow depth is now a HARD CONSTRAINT, not a weighted factor
+# Adjusted to reduce slope dominance and include snow as soft factor
+# This reduces bias from temporal snow variability and steep terrain over-selection
 SUITABILITY_WEIGHTS = {
-    'slope': 0.4,          # 50% - Most important terrain factor
-    'aspect': 0.35,         # 35% - Sun exposure (north-facing preferred)
-    'hillshade': 0.25,      # 15% - Terrain shading
+    'slope': 0.45,         # 45% - Important but not dominating
+    'aspect': 0.30,        # 30% - Sun exposure critical for snow retention
+    'hillshade': 0.15,     # 15% - Terrain shading
+    'snow': 0.10,          # 10% - Snow depth as soft factor (temporal awareness)
 }
 
 assert abs(sum(SUITABILITY_WEIGHTS.values()) - 1.0) < 0.001, "Weights must sum to 1.0"
