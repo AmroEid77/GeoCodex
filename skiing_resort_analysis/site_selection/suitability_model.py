@@ -78,61 +78,88 @@ class SuitabilityModel:
                              aspect_suitability: np.ndarray,
                              hillshade_suitability: np.ndarray,
                              snow_depth: np.ndarray = None,
-                             min_snow_threshold: float = 10.0) -> np.ndarray:
+                             min_snow_threshold: float = 5.0) -> np.ndarray:
         """
         Calculate overall suitability using weighted overlay
-        Snow depth is applied as a HARD CONSTRAINT before weighted overlay
+        Snow depth is now a SOFT weighted factor to reduce temporal bias
         
         Args:
             slope_suitability: Slope suitability scores (0-100)
             aspect_suitability: Aspect suitability scores (0-100)
             hillshade_suitability: Hillshade suitability scores (0-100)
-            snow_depth: Snow depth array (cm) - used as hard constraint
-            min_snow_threshold: Minimum snow depth required (cm)
+            snow_depth: Snow depth array (cm) - used as soft weighted factor
+            min_snow_threshold: Minimal exclusion threshold (cm) - only extreme low values
             
         Returns:
-            Overall suitability scores (0-100), with areas below snow threshold = 0
+            Overall suitability scores (0-100)
         """
         print("\n" + "="*60)
-        print("SUITABILITY MODEL - WEIGHTED OVERLAY")
+        print("SUITABILITY MODEL - WEIGHTED OVERLAY (Soft Snow Constraint)")
         print("="*60)
+        print("\nNon-linear scoring applied for better differentiation")
+        print("Power factor: 1.5 (increases spread between good and excellent sites)")
         
         print(f"\nWeights:")
         print(f"  Slope: {self.weights['slope']*100:.1f}%")
         print(f"  Aspect: {self.weights['aspect']*100:.1f}%")
         print(f"  Hillshade: {self.weights['hillshade']*100:.1f}%")
+        if 'snow' in self.weights:
+            print(f"  Snow Depth: {self.weights['snow']*100:.1f}%")
+        
+        # Calculate snow suitability if snow data provided
+        snow_suitability = None
         if snow_depth is not None:
-            print(f"\nSnow Depth Constraint:")
-            print(f"  Minimum required: {min_snow_threshold:.1f} cm (HARD CONSTRAINT)")
-            print(f"  Areas below threshold will be excluded (suitability = 0)")
+            snow_suitability = self.calculate_snow_suitability(snow_depth)
+            print(f"\nSnow Depth Factor (Soft Constraint):")
+            print(f"  Minimal exclusion threshold: {min_snow_threshold:.1f} cm")
+            print(f"  Integrated as weighted factor ({self.weights.get('snow', 0)*100:.0f}%)")
+            print(f"  This reduces temporal bias from snapshot conditions")
         
         # Initialize suitability
         suitability = np.zeros_like(slope_suitability)
         
-        # STEP 1: Apply snow depth as HARD CONSTRAINT
-        # Areas with insufficient snow get suitability = 0, regardless of terrain
+        # Apply minimal exclusion threshold (only for extremely low snow)
         if snow_depth is not None:
-            sufficient_snow_mask = snow_depth >= min_snow_threshold
-            excluded_cells = np.sum(~sufficient_snow_mask & ~np.isnan(snow_depth))
+            minimal_snow_mask = snow_depth >= min_snow_threshold
+            excluded_cells = np.sum(~minimal_snow_mask & ~np.isnan(snow_depth))
             if excluded_cells > 0:
-                print(f"  Excluded {excluded_cells} cells due to insufficient snow (<{min_snow_threshold:.1f} cm)")
+                print(f"  Hard excluded: {excluded_cells} cells (<{min_snow_threshold:.1f} cm)")
         else:
-            # No snow data - all areas pass constraint
-            sufficient_snow_mask = np.ones_like(slope_suitability, dtype=bool)
+            minimal_snow_mask = np.ones_like(slope_suitability, dtype=bool)
         
-        # STEP 2: Weighted overlay (only for areas with sufficient snow)
-        suitability[sufficient_snow_mask] = (
-            slope_suitability[sufficient_snow_mask] * self.weights['slope'] +
-            aspect_suitability[sufficient_snow_mask] * self.weights['aspect'] +
-            hillshade_suitability[sufficient_snow_mask] * self.weights['hillshade']
-        )
-        
-        # Areas without sufficient snow remain 0
+        # Weighted overlay with snow as soft factor
+        if snow_suitability is not None and 'snow' in self.weights:
+            # Include snow as weighted factor
+            weighted_sum = (
+                slope_suitability[minimal_snow_mask] * self.weights['slope'] +
+                aspect_suitability[minimal_snow_mask] * self.weights['aspect'] +
+                hillshade_suitability[minimal_snow_mask] * self.weights['hillshade'] +
+                snow_suitability[minimal_snow_mask] * self.weights['snow']
+            )
+            
+            # Apply non-linear enhancement to increase discrimination
+            # This makes high-scoring areas stand out more and low-scoring areas drop more
+            # Formula: enhanced = weighted_sum^1.5 / 10 (power factor increases spread)
+            # This creates better differentiation between good and excellent sites
+            suitability[minimal_snow_mask] = np.power(weighted_sum / 100.0, 1.5) * 100.0
+            
+        else:
+            # No snow factor - use original weights
+            weighted_sum = (
+                slope_suitability[minimal_snow_mask] * self.weights['slope'] +
+                aspect_suitability[minimal_snow_mask] * self.weights['aspect'] +
+                hillshade_suitability[minimal_snow_mask] * self.weights['hillshade']
+            )
+            
+            # Apply same non-linear enhancement
+            suitability[minimal_snow_mask] = np.power(weighted_sum / 100.0, 1.5) * 100.0
         
         # Preserve NaN values
         mask_nan = (np.isnan(slope_suitability) | 
                     np.isnan(aspect_suitability) | 
                     np.isnan(hillshade_suitability))
+        if snow_depth is not None:
+            mask_nan = mask_nan | np.isnan(snow_depth)
         suitability[mask_nan] = np.nan
         
         print(f"\nOverall Suitability:")
@@ -272,15 +299,16 @@ class SuitabilityModel:
         
         # Find local maxima using maximum filter
         # Use smaller window (10 pixels = 300m) to find sharp peaks
-        # Only consider HIGH suitability areas (≥80) for best locations
+        # Only consider EXCELLENT suitability areas (≥85) for best locations
+        # Increased threshold for better discrimination
         local_max = maximum_filter(np.nan_to_num(self.suitability_array, nan=0), size=10)
-        is_local_max = (self.suitability_array == local_max) & (self.suitability_array >= 80)
+        is_local_max = (self.suitability_array == local_max) & (self.suitability_array >= 85)
         
         # Get coordinates and values of local maxima
         rows, cols = np.where(is_local_max)
         values = self.suitability_array[rows, cols]
         
-        print(f"  Found {len(values)} candidate peaks with suitability ≥80")
+        print(f"  Found {len(values)} candidate peaks with suitability ≥85")
         if len(values) > 0:
             print(f"  Score range: {values.min():.2f} - {values.max():.2f}")
         
