@@ -6,7 +6,11 @@ Creates interactive HTML maps using Folium library
 import folium
 from folium import plugins
 import geopandas as gpd
+import numpy as np
+import rasterio
+from rasterio.warp import calculate_default_transform, reproject, Resampling
 import os
+from branca.colormap import LinearColormap
 
 
 def create_interactive_map(dem_path, snow_raster, suitability_raster, 
@@ -70,11 +74,83 @@ def create_interactive_map(dem_path, snow_raster, suitability_raster,
     ).add_to(m)
     
     # Add layer groups
-    areas_layer = folium.FeatureGroup(name='Suitable Areas', show=True)
-    locations_layer = folium.FeatureGroup(name='Best Locations', show=True)
-    reference_layer = folium.FeatureGroup(name='Reference (Dam & Ridges)', show=False)
+    suitability_layer = folium.FeatureGroup(name='Suitability Heatmap', show=True)
+    areas_layer = folium.FeatureGroup(name='Suitable Areas (Polygons)', show=False)
+    locations_layer = folium.FeatureGroup(name='🌟 Best Locations', show=True)
+    reference_layer = folium.FeatureGroup(name='Reference (Dam & Ridges)', show=True)
     
-    # Add best locations as markers
+    # Add suitability raster as image overlay
+    try:
+        if os.path.exists(suitability_raster):
+            print("  Adding suitability heatmap overlay...")
+            with rasterio.open(suitability_raster) as src:
+                suitability_data = src.read(1)
+                bounds_proj = src.bounds
+                crs_proj = src.crs
+                
+                # Transform bounds to WGS84
+                if crs_proj.to_epsg() != 4326:
+                    from pyproj import Transformer
+                    transformer = Transformer.from_crs(crs_proj, "EPSG:4326", always_xy=True)
+                    
+                    # Get corner coordinates
+                    sw_lon, sw_lat = transformer.transform(bounds_proj.left, bounds_proj.bottom)
+                    ne_lon, ne_lat = transformer.transform(bounds_proj.right, bounds_proj.top)
+                    bounds_wgs84 = [[sw_lat, sw_lon], [ne_lat, ne_lon]]
+                else:
+                    bounds_wgs84 = [[bounds_proj.bottom, bounds_proj.left], 
+                                   [bounds_proj.top, bounds_proj.right]]
+                
+                # Normalize and create colored overlay
+                suit_normalized = np.nan_to_num(suitability_data, nan=0)
+                suit_normalized = np.clip(suit_normalized, 0, 100) / 100.0
+                
+                # Create color map (Red -> Yellow -> Green)
+                from matplotlib import cm
+                from matplotlib.colors import Normalize
+                import matplotlib.pyplot as plt
+                
+                # Use RdYlGn colormap
+                norm = Normalize(vmin=0, vmax=100)
+                cmap = cm.get_cmap('RdYlGn')
+                
+                # Apply colormap
+                colored = cmap(suit_normalized)
+                colored = (colored[:, :, :3] * 255).astype(np.uint8)
+                
+                # Mask low suitability areas (make transparent)
+                mask = suitability_data < 50
+                colored[mask] = [0, 0, 0, 0]
+                
+                # Save temporary PNG
+                import tempfile
+                from PIL import Image
+                temp_dir = tempfile.gettempdir()
+                temp_img = os.path.join(temp_dir, 'suitability_overlay.png')
+                
+                # Create RGBA image with transparency
+                img_array = np.zeros((colored.shape[0], colored.shape[1], 4), dtype=np.uint8)
+                img_array[:, :, :3] = colored
+                img_array[:, :, 3] = np.where(mask, 0, 180)  # Alpha channel (180 = semi-transparent)
+                
+                img = Image.fromarray(img_array, mode='RGBA')
+                img.save(temp_img)
+                
+                # Add as image overlay
+                folium.raster_layers.ImageOverlay(
+                    image=temp_img,
+                    bounds=bounds_wgs84,
+                    opacity=0.6,
+                    interactive=False,
+                    cross_origin=False,
+                    zindex=1,
+                ).add_to(suitability_layer)
+                
+                print("  ✓ Suitability heatmap added")
+    except Exception as e:
+        print(f"  ⚠ Could not add suitability overlay: {e}")
+    
+    # Add best locations with custom star icons and circles
     try:
         if os.path.exists(best_locations_geojson):
             best_locs = gpd.read_file(best_locations_geojson)
@@ -83,19 +159,110 @@ def create_interactive_map(dem_path, snow_raster, suitability_raster,
                 if best_locs.crs.to_epsg() != 4326:
                     best_locs = best_locs.to_crs(epsg=4326)
                 
+                print(f"  Adding {len(best_locs)} best locations...")
+                
                 for idx, row in best_locs.iterrows():
+                    rank = row['rank']
+                    score = row['suitability']
+                    
+                    # Color based on rank
+                    if rank == 1:
+                        color = 'red'
+                        icon_color = 'white'
+                        size = 'large'
+                    elif rank <= 3:
+                        color = 'darkred'
+                        icon_color = 'white'
+                        size = 'medium'
+                    else:
+                        color = 'orange'
+                        icon_color = 'white'
+                        size = 'small'
+                    
+                    # Add circular highlight around location
+                    folium.Circle(
+                        location=[row.geometry.y, row.geometry.x],
+                        radius=500,  # 500 meters
+                        color=color,
+                        fill=True,
+                        fillColor=color,
+                        fillOpacity=0.15,
+                        weight=2,
+                        opacity=0.8,
+                        popup=None,
+                        tooltip=None
+                    ).add_to(locations_layer)
+                    
+                    # Custom HTML icon with star
+                    star_html = f"""
+                    <div style="text-align: center;">
+                        <div style="font-size: 32px; color: {color}; 
+                                    text-shadow: 2px 2px 4px rgba(0,0,0,0.7),
+                                               -1px -1px 2px white,
+                                                1px -1px 2px white,
+                                               -1px 1px 2px white,
+                                                1px 1px 2px white;">
+                            ⭐
+                        </div>
+                        <div style="background: {color}; color: white; 
+                                    border-radius: 50%; width: 24px; height: 24px; 
+                                    display: flex; align-items: center; justify-content: center;
+                                    font-weight: bold; font-size: 14px;
+                                    border: 2px solid white;
+                                    box-shadow: 0 0 5px rgba(0,0,0,0.5);
+                                    margin: -10px auto 0 auto;">
+                            {rank}
+                        </div>
+                    </div>
+                    """
+                    
+                    # Detailed popup
+                    popup_html = f"""
+                    <div style="font-family: Arial; min-width: 200px;">
+                        <h3 style="margin: 0 0 10px 0; color: {color}; border-bottom: 2px solid {color};">
+                            🏔️ Location #{rank}
+                        </h3>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="background: #f0f0f0;">
+                                <td style="padding: 5px; font-weight: bold;">Suitability:</td>
+                                <td style="padding: 5px; text-align: right;">
+                                    <span style="background: {color}; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold;">
+                                        {score:.2f}/100
+                                    </span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 5px; font-weight: bold;">Rank:</td>
+                                <td style="padding: 5px; text-align: right;">#{rank}</td>
+                            </tr>
+                            <tr style="background: #f0f0f0;">
+                                <td style="padding: 5px; font-weight: bold;">Longitude:</td>
+                                <td style="padding: 5px; text-align: right;">{row.geometry.x:.6f}°</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 5px; font-weight: bold;">Latitude:</td>
+                                <td style="padding: 5px; text-align: right;">{row.geometry.y:.6f}°</td>
+                            </tr>
+                        </table>
+                        <p style="margin: 10px 0 0 0; padding: 8px; background: #fffacd; border-radius: 3px; font-size: 11px;">
+                            <b>💡 Tip:</b> This location scored highest based on slope, aspect, hillshade, and snow depth.
+                        </p>
+                    </div>
+                    """
+                    
+                    # Add marker with custom icon
                     folium.Marker(
                         location=[row.geometry.y, row.geometry.x],
-                        popup=f"""
-                        <b>Best Location #{row['rank']}</b><br>
-                        Suitability: {row['suitability']:.2f}/100<br>
-                        Coordinates: ({row.geometry.x:.2f}, {row.geometry.y:.2f})
-                        """,
-                        tooltip=f"Rank {row['rank']} - Score: {row['suitability']:.1f}",
-                        icon=folium.Icon(color='red', icon='star', prefix='fa')
+                        popup=folium.Popup(popup_html, max_width=300),
+                        tooltip=f"<b>Rank #{rank}</b><br>Score: {score:.1f}/100<br>Click for details",
+                        icon=folium.DivIcon(html=star_html)
                     ).add_to(locations_layer)
+                
+                print(f"  ✓ Added {len(best_locs)} best locations")
     except Exception as e:
-        print(f"  Warning: Could not add best locations: {e}")
+        print(f"  ⚠ Could not add best locations: {e}")
+        import traceback
+        traceback.print_exc()
     
     # Add suitable areas as polygons
     try:
@@ -170,6 +337,7 @@ def create_interactive_map(dem_path, snow_raster, suitability_raster,
         print(f"  Warning: Could not add ridges: {e}")
     
     # Add all layers to map
+    suitability_layer.add_to(m)
     areas_layer.add_to(m)
     locations_layer.add_to(m)
     reference_layer.add_to(m)
@@ -177,36 +345,106 @@ def create_interactive_map(dem_path, snow_raster, suitability_raster,
     # Add layer control
     folium.LayerControl(position='topright', collapsed=False).add_to(m)
     
-    # Add title
+    # Add custom title with better styling
     title_html = '''
     <div style="position: fixed; 
-                top: 10px; left: 50px; width: 500px; height: 90px; 
-                background-color: white; border:2px solid grey; z-index:9999; 
-                font-size:16px; padding: 10px; border-radius: 5px; opacity: 0.9;">
-        <h3 style="margin: 0; color: #2c3e50;">Skiing Resort Site Selection Analysis</h3>
-        <p style="margin: 5px 0; font-size: 12px; color: #555;">
-            <b>Task 1:</b> Snow depth interpolation (Kriging method)<br>
-            <b>Task 2:</b> Suitability based on slope, orientation & shading
+                top: 10px; left: 50px; width: 520px; 
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border: none; z-index: 9999; 
+                font-size: 16px; padding: 15px; border-radius: 10px; 
+                box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+                color: white;">
+        <h3 style="margin: 0 0 10px 0; color: white; font-size: 20px;">
+            ⛷️ Skiing Resort Site Selection Analysis
+        </h3>
+        <p style="margin: 5px 0; font-size: 13px; opacity: 0.95;">
+            <b>📊 Task 1:</b> Snow depth interpolation using Kriging<br>
+            <b>🗺️ Task 2:</b> Multi-criteria suitability analysis<br>
+            <b>🌟 Top Locations:</b> Click stars to see detailed information
         </p>
     </div>
     '''
     m.get_root().html.add_child(folium.Element(title_html))
     
-    # Add legend for suitability
+    # Enhanced legend with better styling
     legend_html = '''
     <div style="position: fixed; 
-                bottom: 50px; right: 50px; width: 200px; 
-                background-color: white; border:2px solid grey; z-index:9999; 
-                font-size:12px; padding: 10px; border-radius: 5px; opacity: 0.9;">
-        <h4 style="margin: 0 0 10px 0;">Suitability Score</h4>
-        <div><span style="background:#26964B; width:20px; height:15px; display:inline-block;"></span> 90-100 Optimal</div>
-        <div><span style="background:#66D966; width:20px; height:15px; display:inline-block;"></span> 70-90 Good</div>
-        <div><span style="background:#FFFF9D; width:20px; height:15px; display:inline-block;"></span> 50-70 Moderate</div>
-        <div><span style="background:#F44336; width:20px; height:15px; display:inline-block;"></span> 0-50 Poor</div>
-        <hr>
-        <div><i class="fa fa-star" style="color:red"></i> Best Locations</div>
-        <div style="border-left: 3px solid blue; padding-left: 5px; margin-top: 5px;">Dam Line</div>
-        <div style="border-left: 3px solid brown; padding-left: 5px; margin-top: 5px;">Ridges</div>
+                bottom: 30px; right: 30px; width: 240px; 
+                background-color: white; 
+                border: none;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+                z-index: 9999; 
+                font-size: 13px; padding: 15px; border-radius: 10px;">
+        <h4 style="margin: 0 0 12px 0; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 5px;">
+            📍 Map Legend
+        </h4>
+        
+        <div style="margin-bottom: 12px;">
+            <h5 style="margin: 0 0 6px 0; color: #555; font-size: 12px;">Suitability Score:</h5>
+            <div style="margin: 3px 0;">
+                <span style="background: linear-gradient(to right, #26964B, #4CAF50); 
+                            width: 30px; height: 18px; display: inline-block; 
+                            border-radius: 3px; vertical-align: middle;"></span>
+                <span style="margin-left: 8px;">90-100 (Optimal)</span>
+            </div>
+            <div style="margin: 3px 0;">
+                <span style="background: linear-gradient(to right, #9ACD32, #CDDC39); 
+                            width: 30px; height: 18px; display: inline-block; 
+                            border-radius: 3px; vertical-align: middle;"></span>
+                <span style="margin-left: 8px;">70-90 (Good)</span>
+            </div>
+            <div style="margin: 3px 0;">
+                <span style="background: linear-gradient(to right, #FFC107, #FFD54F); 
+                            width: 30px; height: 18px; display: inline-block; 
+                            border-radius: 3px; vertical-align: middle;"></span>
+                <span style="margin-left: 8px;">50-70 (Moderate)</span>
+            </div>
+            <div style="margin: 3px 0;">
+                <span style="background: linear-gradient(to right, #F44336, #EF5350); 
+                            width: 30px; height: 18px; display: inline-block; 
+                            border-radius: 3px; vertical-align: middle;"></span>
+                <span style="margin-left: 8px;">0-50 (Poor)</span>
+            </div>
+        </div>
+        
+        <hr style="border: none; border-top: 1px solid #ddd; margin: 10px 0;">
+        
+        <div style="margin-bottom: 8px;">
+            <h5 style="margin: 0 0 6px 0; color: #555; font-size: 12px;">Best Locations:</h5>
+            <div style="margin: 3px 0;">
+                <span style="font-size: 20px; color: red;">⭐</span>
+                <span style="background: red; color: white; padding: 2px 6px; 
+                            border-radius: 50%; font-weight: bold; font-size: 11px; 
+                            margin: 0 5px;">1</span>
+                <span>Top Location</span>
+            </div>
+            <div style="margin: 3px 0;">
+                <span style="font-size: 20px; color: #8B0000;">⭐</span>
+                <span style="background: #8B0000; color: white; padding: 2px 6px; 
+                            border-radius: 50%; font-weight: bold; font-size: 11px; 
+                            margin: 0 5px;">2-3</span>
+                <span>Top 3</span>
+            </div>
+            <div style="margin: 3px 0;">
+                <span style="font-size: 20px; color: orange;">⭐</span>
+                <span style="background: orange; color: white; padding: 2px 6px; 
+                            border-radius: 50%; font-weight: bold; font-size: 11px; 
+                            margin: 0 5px;">4+</span>
+                <span>Other Locations</span>
+            </div>
+        </div>
+        
+        <hr style="border: none; border-top: 1px solid #ddd; margin: 10px 0;">
+        
+        <div>
+            <h5 style="margin: 0 0 6px 0; color: #555; font-size: 12px;">Reference Layers:</h5>
+            <div style="margin: 3px 0;">
+                <span style="border-left: 4px solid blue; padding-left: 8px; margin-left: 4px;">Dam Line</span>
+            </div>
+            <div style="margin: 3px 0;">
+                <span style="border-left: 4px solid brown; padding-left: 8px; margin-left: 4px;">Ridge Lines</span>
+            </div>
+        </div>
     </div>
     '''
     m.get_root().html.add_child(folium.Element(legend_html))
